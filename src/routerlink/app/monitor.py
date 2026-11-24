@@ -26,7 +26,7 @@ from routerlink.app.data_log import DataLog
 from routerlink.app.store import Choice, KnownRouter, Settings, Store
 from routerlink.domain.line import DSL_PAGE, RECEIVER_PAGE, DSLDetails, ReceiverStatus
 from routerlink.domain.samples import (
-    CRCErrorRate,
+    ErrorRate,
     LineSample,
     NormalSync,
     OverflowSample,
@@ -77,7 +77,8 @@ class Readings:
     receiver: ReceiverStatus | None = None
     bonding: BondingStatus | None = None
     overflow: OverflowSample | None = None
-    crc_rate: CRCErrorRate | None = None
+    crc_rate: ErrorRate | None = None
+    fec_rate: ErrorRate | None = None
     traffic: LANTrafficRate | None = None
     status_time: datetime | None = None
     details_time: datetime | None = None
@@ -511,7 +512,8 @@ class Monitor:
             now = datetime.now(UTC)
             sample = LineSample.from_details(now, dsl, receiver)
             reference = self._line_reference(now)
-            self.readings.crc_rate = CRCErrorRate.between(reference, sample) if reference else None
+            self.readings.crc_rate = ErrorRate.crc(reference, sample) if reference else None
+            self.readings.fec_rate = ErrorRate.fec(reference, sample) if reference else None
             self._last_line = sample
             self.readings.dsl, self.readings.receiver = dsl, receiver
             self.readings.details_time = now
@@ -558,7 +560,7 @@ class Monitor:
     def _clear_details(self) -> None:
         readings = self.readings
         readings.dsl = readings.receiver = readings.bonding = readings.overflow = None
-        readings.crc_rate = readings.details_time = None
+        readings.crc_rate = readings.fec_rate = readings.details_time = None
         self._last_line = None
 
     def _clear_readings(self) -> None:

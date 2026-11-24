@@ -95,7 +95,9 @@ function renderDSL(state) {
       ["CRC errors ↓ / ↑", pair(plain(d.crcDown), plain(d.crcUp)), d.crcRating,
        d.crcPerHourDown === null && d.crcPerHourUp === null ? "Totals since the last resync; rated from the second poll on."
          : `Totals since the last resync. Increase: ${perHour(d.crcPerHourDown)} ↓, ${perHour(d.crcPerHourUp)} ↑.`],
-      ["FEC errors ↓ / ↑", pair(plain(d.fecDown), plain(d.fecUp))],
+      ["FEC errors ↓ / ↑", pair(plain(d.fecDown), plain(d.fecUp)), null,
+       d.fecPerHourDown === null && d.fecPerHourUp === null ? "Corrected errors since the last resync; normal in operation."
+         : `Corrected errors since the last resync (normal in operation). Increase: ${perHour(d.fecPerHourDown)} ↓, ${perHour(d.fecPerHourUp)} ↑.`],
     );
   }
   // With a 5G receiver the internet rate is the DSL overflow limit, shown under bonding.
@@ -390,6 +392,7 @@ const SVG = "http://www.w3.org/2000/svg";
 const CHART = { width: 1000, height: 170, top: 6, bottom: 6 };
 const TIME_LABEL_FRACTIONS = [0, 0.25, 0.5, 0.75, 1];
 const TIME_LABEL_DAY_LIMIT_MS = 36 * 3600 * 1000;   // up to this range: times of day only
+const TIME_LABEL_WEEK_LIMIT_MS = 8 * 24 * 3600 * 1000;   // above: dates only
 const TICK_TARGET = 4;
 const GAP_FACTOR = 3;
 // Titles of collapsed charts, kept across reloads and history refreshes.
@@ -431,9 +434,10 @@ const WIFI_COLORS = ["var(--wifi1)", "var(--wifi2)"];
 // Options: `dots` marks every point (sparse series such as speed tests; points with
 // `wifi: true` are marked in the Wi-Fi colour); `bands` shades [startMs, endMs] ranges
 // red (problems); `note` is extra header text; `wifiNote` adds a legend entry in the
-// Wi-Fi colour; `palette` replaces the series colours.
+// Wi-Fi colour; `palette` replaces the series colours; `references` draws a dashed
+// line per series at that value (null: none).
 function chart(title, unit, names, points, start, end, maxGapMs,
-               { dots = false, bands = [], note = null, wifiNote = null, palette = SERIES_COLORS } = {}) {
+               { dots = false, bands = [], note = null, wifiNote = null, palette = SERIES_COLORS, references = [] } = {}) {
   const box = element("details", { class: "chart" });
   box.open = !collapsedCharts().has(title);
   box.addEventListener("toggle", () => rememberCollapsed(title, !box.open));
@@ -446,15 +450,18 @@ function chart(title, unit, names, points, start, end, maxGapMs,
   heading.append(legend);
   box.append(heading);
 
-  const values = points.flatMap((p) => p.values).filter((v) => v !== null && v !== undefined);
+  const values = points.flatMap((p) => p.values).concat(references).filter((v) => v !== null && v !== undefined);
   if (values.length === 0) {
     box.append(element("p", { class: "muted" }, "No values in this range."));
     return box;
   }
   let low = Math.min(...values), high = Math.max(...values);
+  // Counts and rates are never negative: their axis starts at 0.
+  const nonNegative = low >= 0;
   if (low === high) { low -= 1; high += 1; }
   const pad = (high - low) * 0.08;
   low -= pad; high += pad;
+  if (nonNegative) low = Math.max(low, 0);
   const ticks = niceTicks(low, high);
 
   // The lines are drawn in a viewBox stretched to the card width (vertical scale 1:1);
@@ -476,11 +483,17 @@ function chart(title, unit, names, points, start, end, maxGapMs,
                                     "vector-effect": "non-scaling-stroke" }));
     plot.append(element("span", { class: "y-label", style: `top: ${y(tick)}px` }, tick.toFixed(ticks.decimals)));
   }
+  references.forEach((value, series) => {
+    if (value === null || value === undefined) return;
+    svg.append(svgElement("line", { x1: 0, x2: CHART.width, y1: y(value), y2: y(value), stroke: palette[series],
+                                    "stroke-dasharray": "6 4", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
+  });
   const shortRange = end - start <= TIME_LABEL_DAY_LIMIT_MS;
+  const longRange = end - start > TIME_LABEL_WEEK_LIMIT_MS;
   for (const fraction of TIME_LABEL_FRACTIONS) {
     const t = start + (end - start) * fraction;
     const text = new Date(t).toLocaleString([], shortRange ? { hour: "2-digit", minute: "2-digit" }
-                                                           : { weekday: "short", hour: "2-digit", minute: "2-digit" });
+      : longRange ? { day: "numeric", month: "short" } : { weekday: "short", hour: "2-digit", minute: "2-digit" });
     const align = fraction === 0 ? "start" : fraction === 1 ? "end" : "middle";
     plot.append(element("span", { class: `x-label ${align}`, style: `left: ${fraction * 100}%` }, text));
   }
@@ -542,9 +555,24 @@ async function refreshHistory() {
   const detailsGap = (current ? current.settings.detailsInterval : 300) * 1000 * GAP_FACTOR;
   const mbit = (v) => (v === null ? null : v / BITS_PER_MEGABIT);
   const series = (rows, map) => rows.map((row) => ({ time: Date.parse(row[0]), values: map(row) }));
+  // Outages: from a poll that saw the internet offline to the next poll.
+  const outages = [];
+  h.status.forEach((r, i) => {
+    if (r[5]) return;
+    const from = Date.parse(r[0]);
+    outages.push([from, i + 1 < h.status.length ? Date.parse(h.status[i + 1][0]) : from + statusGap / GAP_FACTOR]);
+  });
+  const normal = h.normalSync.map(mbit);
+  const syncNote = [normal[0] !== null ? "dashed: normal (7-day median)" : null, outages.length ? "red: offline" : null]
+    .filter(Boolean).join(" · ") || null;
   document.getElementById("charts-dsl").replaceChildren(
-    chart("DSL sync rate", "Mbit/s", ["↓ down", "↑ up"], series(h.status, (r) => [mbit(r[1]), mbit(r[2])]), start, end, statusGap),
+    chart("DSL sync rate", "Mbit/s", ["↓ down", "↑ up"], series(h.status, (r) => [mbit(r[1]), mbit(r[2])]), start, end, statusGap,
+          { references: normal, bands: outages, note: syncNote }),
     chart("SNR margin", "dB", ["↓ down", "↑ up"], series(h.line, (r) => [r[1], r[2]]), start, end, detailsGap),
+    chart("Attainable rate", "Mbit/s", ["↓ down", "↑ up"], series(h.line, (r) => [mbit(r[3]), mbit(r[4])]), start, end, detailsGap,
+          { note: "line capacity; a slow decline means a degrading line" }),
+    chart("CRC errors", "per hour", ["↓ down", "↑ up"], series(h.crc, (r) => [r[1], r[2]]), start, end, detailsGap,
+          { note: "uncorrectable; 0 is normal" }),
   );
   // Tests are minutes to hours apart: connect them all, mark each one.
   // Tests from a host on Wi-Fi measure Wi-Fi, not the line: they get their own panel in
@@ -566,6 +594,8 @@ async function refreshHistory() {
   document.getElementById("charts-speedtest").replaceChildren(...panels);
   document.getElementById("charts-mobile").replaceChildren(
     chart("Receiver signal (RSRP)", "dBm", ["5G", "LTE"], series(h.status, (r) => [r[3], r[4]]), start, end, statusGap),
+    chart("Signal quality (RSRQ)", "dB", ["5G", "LTE"], series(h.line, (r) => [r[5], r[6]]), start, end, detailsGap,
+          { note: "interference and load; below −20 dB is poor" }),
     bondingChart(h.overflow, start, end, detailsGap),
   );
 }

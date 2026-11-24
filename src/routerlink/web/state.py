@@ -6,13 +6,14 @@ from datetime import UTC, datetime, timedelta
 from routerlink.app.data_log import DataLog
 from routerlink.app.monitor import Monitor
 from routerlink.domain.line import Cell
+from routerlink.domain.samples import ErrorRate, NormalSync
 from routerlink.domain.quality import Quality, crc_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality, worst
 from routerlink.domain.traffic import HybridTrafficRate
 
 _KBIT = 1000
 _ONLINE = "online"
 _RUNNING = "running"
-HISTORY_RANGES = {"day": timedelta(days=1), "week": timedelta(days=7)}
+HISTORY_RANGES = {"day": timedelta(days=1), "week": timedelta(days=7), "month": timedelta(days=30)}
 
 
 def _iso(time: datetime | None) -> str | None:
@@ -101,6 +102,8 @@ def state(monitor: Monitor) -> dict:
             "crcDown": down.crc_errors, "crcUp": up.crc_errors,
             "crcPerHourDown": crc.down_per_hour if crc else None, "crcPerHourUp": crc.up_per_hour if crc else None,
             "crcRating": _rating(crc_rating),
+            "fecPerHourDown": readings.fec_rate.down_per_hour if readings.fec_rate else None,
+            "fecPerHourUp": readings.fec_rate.up_per_hour if readings.fec_rate else None,
             "fecDown": down.fec_errors, "fecUp": up.fec_errors,
         }
     if has_receiver:
@@ -154,14 +157,38 @@ def _speedtest(monitor: Monitor) -> dict:
     }
 
 
-def history(data_log: DataLog, range_name: str) -> dict:
+def _measured(value: float | None) -> float | None:
+    """Older log rows may hold the receiver's 0.0 placeholder ("no measurement")."""
+    return None if value == 0 else value
+
+
+def _sync(rate: int | None, online: bool) -> int | None:
+    """Older log rows may hold the router's sync 0 glitch while online."""
+    return None if rate == 0 and online else rate
+
+
+def _bps(kbps: int | None) -> int | None:
+    return kbps * _KBIT if kbps is not None else None
+
+
+def history(data_log: DataLog, range_name: str, normal_sync: NormalSync) -> dict:
     since = datetime.now(UTC) - HISTORY_RANGES[range_name]
+    lines = data_log.line_samples(since)
+    crc_rates = [(current, ErrorRate.crc(previous, current)) for previous, current in zip(lines, lines[1:])]
     return {
         "since": _iso(since),
         "now": _iso(datetime.now(UTC)),
-        "status": [[_iso(s.time), s.dsl_downstream, s.dsl_upstream, s.nr_signal, s.lte_signal]
+        "normalSync": [normal_sync.down_bps, normal_sync.up_bps],
+        # [time, sync down, sync up, 5G dBm, LTE dBm, online]
+        "status": [[_iso(s.time), _sync(s.dsl_downstream, s.online_status == _ONLINE),
+                    _sync(s.dsl_upstream, s.online_status == _ONLINE), s.nr_signal, s.lte_signal, s.online_status == _ONLINE]
                    for s in data_log.status_samples(since)],
-        "line": [[_iso(s.time), s.snr_margin_down, s.snr_margin_up] for s in data_log.line_samples(since)],
+        # [time, SNR down, SNR up, attainable down, attainable up (bit/s), 5G RSRQ, LTE RSRQ]
+        "line": [[_iso(s.time), s.snr_margin_down, s.snr_margin_up, _bps(s.attainable_down_kbps),
+                  _bps(s.attainable_up_kbps), _measured(s.nr_rsrq), _measured(s.lte_rsrq)] for s in lines],
+        # [time, CRC errors per hour down, up] between consecutive line polls
+        "crc": [[_iso(current.time), rate.down_per_hour if rate else None, rate.up_per_hour if rate else None]
+                for current, rate in crc_rates],
         # [time, 5G down, 5G up, DSL leg up, 5G leg up, DSL limit down, DSL limit up] (bit/s)
         "overflow": [[_iso(s.time), s.mobile_down_bps, s.mobile_up_bps, s.dsl_leg_up, s.mobile_leg_up,
                       s.dsl_down_limit_kbps and s.dsl_down_limit_kbps * _KBIT,

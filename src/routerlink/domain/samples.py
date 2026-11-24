@@ -172,25 +172,37 @@ class LineSample:
 
 
 @dataclass(frozen=True)
-class CRCErrorRate:
-    """Increase of the CRC counters between two line samples, per hour; None per
+class ErrorRate:
+    """Increase of a DSL error counter between two line samples, per hour; None per
     direction without both readings or when the counter went backwards (resync)."""
 
     down_per_hour: float | None
     up_per_hour: float | None
 
     @classmethod
-    def between(cls, previous: LineSample, current: LineSample) -> "CRCErrorRate | None":
+    def crc(cls, previous: LineSample, current: LineSample) -> "ErrorRate | None":
+        """Uncorrectable errors."""
+        return cls._between(previous, current, (previous.crc_down, current.crc_down), (previous.crc_up, current.crc_up))
+
+    @classmethod
+    def fec(cls, previous: LineSample, current: LineSample) -> "ErrorRate | None":
+        """Corrected errors: normal in operation, not rated."""
+        return cls._between(previous, current, (previous.fec_down, current.fec_down), (previous.fec_up, current.fec_up))
+
+    @classmethod
+    def _between(cls, previous: LineSample, current: LineSample, down: tuple[int | None, int | None],
+                 up: tuple[int | None, int | None]) -> "ErrorRate | None":
         seconds = (current.time - previous.time).total_seconds()
         if seconds <= 0:
             return None
 
-        def per_hour(before: int | None, after: int | None) -> float | None:
+        def per_hour(counts: tuple[int | None, int | None]) -> float | None:
+            before, after = counts
             if before is None or after is None or after < before:
                 return None
             return (after - before) * _SECONDS_PER_HOUR / seconds
 
-        return cls(per_hour(previous.crc_down, current.crc_down), per_hour(previous.crc_up, current.crc_up))
+        return cls(per_hour(down), per_hour(up))
 
 
 @dataclass(frozen=True)

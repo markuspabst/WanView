@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 from routerlink.app.data_log import DataLog
 from routerlink.app.monitor import Monitor
 from routerlink.app.store import Settings, Store
-from routerlink.domain.samples import OverflowSample
+from routerlink.domain.line import DSLDetails
+from routerlink.domain.samples import LineSample, OverflowSample, StatusSample
+from routerlink.domain.status import LineStatus
+from routerlink.speedport.engineer_page import EngineerPage
+from routerlink.speedport.varlist import VarList
 from routerlink.web.server import create_app
 
 DEFAULTS = Settings(router_url="https://speedport.ip", status_interval=3600, details_interval=3600)
@@ -78,3 +82,21 @@ def test_history_includes_bonding_state(tmp_path: Path) -> None:
     with client(tmp_path, FakeRouter()) as api:
         row = api.get("/api/history?range=day").json()["overflow"][0]
         assert row[1:] == [2_000_000, 100_000, True, False, 84_716_000, 30_121_000]
+
+
+def test_history_has_outages_line_details_and_crc_rate(tmp_path: Path) -> None:
+    data_log = DataLog(tmp_path / "logs")
+    start = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+    for minutes, crc, online in ((0, 100, "online"), (30, 110, "offline")):
+        time = start + timedelta(minutes=minutes)
+        dsl = DSLDetails.from_page(EngineerPage(f'downstream_status[1] = " 99367 Kbps";\ndownstream_status[8] = "{crc}";'))
+        data_log.append_line(LineSample.from_details(time, dsl, None))
+        status = LineStatus.from_vars(VarList.from_json(f'[{{"varid":"onlinestatus","varvalue":"{online}"}}]'))
+        data_log.append_status(StatusSample.from_status(time, status))
+    with client(tmp_path, FakeRouter()) as api:
+        h = api.get("/api/history?range=month").json()
+        # The two logged polls (the fake router's own status poll at startup comes after them).
+        assert [row[5] for row in h["status"][:2]] == [True, False]
+        assert h["line"][0][3] == 99_367_000
+        assert h["crc"][0][1] == 20.0          # 10 errors in 30 min
+        assert len(h["normalSync"]) == 2

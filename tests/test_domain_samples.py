@@ -5,7 +5,7 @@ import pytest
 from routerlink.domain.line import DSLDetails
 from routerlink.domain.quality import Quality, crc_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality
 from routerlink.domain.samples import (
-    CRCErrorRate,
+    ErrorRate,
     HostLink,
     LineSample,
     NormalSync,
@@ -86,11 +86,19 @@ def line(seconds: int, down: int, up: int) -> LineSample:
 
 
 def test_crc_increase_per_hour() -> None:
-    assert CRCErrorRate.between(line(0, 100, 5), line(300, 110, 5)) == CRCErrorRate(120, 0)
+    assert ErrorRate.crc(line(0, 100, 5), line(300, 110, 5)) == ErrorRate(120, 0)
+
+
+def test_fec_increase_per_hour() -> None:
+    def fec(seconds: int, down: int) -> LineSample:
+        dsl = DSLDetails.from_page(EngineerPage(f'downstream_status[10] = "{down}";\nupstream_status[10] = "0";'))
+        return LineSample.from_details(TIME + timedelta(seconds=seconds), dsl, None)
+
+    assert ErrorRate.fec(fec(0, 1_000), fec(3600, 3_500)) == ErrorRate(2_500, 0)
 
 
 def test_crc_counter_reset_gives_no_rate() -> None:
-    assert CRCErrorRate.between(line(0, 5_000, 5), line(300, 3, 6)) == CRCErrorRate(None, 12)
+    assert ErrorRate.crc(line(0, 5_000, 5), line(300, 3, 6)) == ErrorRate(None, 12)
 
 
 @pytest.mark.parametrize(("rsrp", "expected"), [(-75, Quality.EXCELLENT), (-80, Quality.EXCELLENT), (-85, Quality.GOOD),

@@ -2,7 +2,7 @@
 
     GET  /                       dashboard (static/index.html)
     GET  /api/state              current readings; keeps live LAN traffic running
-    GET  /api/history?range=day  logged history (day | week)
+    GET  /api/history?range=day  logged history (day | week | month)
     POST /api/pause | /api/resume | /api/restart-router
     POST /api/speedtest          starts a speed test (409 while one runs or monitoring is paused)
     PUT  /api/password           {"password": "…"} for the identified router (sets it up)
@@ -104,8 +104,8 @@ def create_app(monitor: Monitor, data_log: DataLog, dashboard_password: str | No
         return state(monitor)
 
     @app.get("/api/history")
-    async def get_history(range_name: Annotated[str, Query(alias="range", pattern="^(day|week)$")] = "day") -> dict:
-        return history(data_log, range_name)
+    async def get_history(range_name: Annotated[str, Query(alias="range", pattern="^(day|week|month)$")] = "day") -> dict:
+        return history(data_log, range_name, monitor.normal_sync)
 
     @app.post("/api/pause", status_code=status.HTTP_204_NO_CONTENT)
     async def pause() -> None:
