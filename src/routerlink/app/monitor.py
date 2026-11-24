@@ -47,7 +47,7 @@ from routerlink.domain.traffic import (
 from routerlink.speedport.client import REBOOT_SECONDS, SpeedportClient
 from routerlink.speedport.errors import SpeedportError
 from routerlink.host_network import InterfaceKind, default_interface_kind
-from routerlink.speedtest import SpeedTester
+from routerlink.speedtest import RateLimited, SpeedTester
 
 log = logging.getLogger(__name__)
 
@@ -111,6 +111,9 @@ class Monitor:
         logged_tests = data_log.speedtest_samples(datetime.now(UTC) - _SPEEDTEST_HISTORY)
         self.last_speedtest: SpeedTestSample | None = logged_tests[-1] if logged_tests else None
         self.speedtest_error: str | None = None
+        # Scheduled tests count from the last attempt, so failures are not retried every minute.
+        self._last_speedtest_attempt: datetime | None = self.last_speedtest.time if self.last_speedtest else None
+        self._speedtest_blocked_until: datetime | None = None
         self._speedtest_task: asyncio.Task[None] | None = None
         self._schedule_task: asyncio.Task[None] | None = None
         self._client = client_factory(self.settings.router_url, None)
@@ -288,18 +291,24 @@ class Monitor:
         if self.speedtest_running or self.paused or self.router_back_time is not None:
             return False
         log.info("Speed test started")
+        self._last_speedtest_attempt = datetime.now(UTC)
         self._speedtest_task = asyncio.get_running_loop().create_task(self._run_speedtest())
         return True
 
     async def _speedtest_schedule(self) -> None:
         while True:
             await asyncio.sleep(_SPEEDTEST_CHECK_SECONDS)
-            interval = self.settings.speedtest_interval
-            if not interval:
-                continue
-            last = self.last_speedtest.time if self.last_speedtest else None
-            if last is None or datetime.now(UTC) - last >= timedelta(minutes=interval):
+            if self._speedtest_due(datetime.now(UTC)):
                 self.start_speedtest()
+
+    def _speedtest_due(self, now: datetime) -> bool:
+        interval = self.settings.speedtest_interval
+        if not interval:
+            return False
+        if self._speedtest_blocked_until is not None and now < self._speedtest_blocked_until:
+            return False
+        last = self._last_speedtest_attempt
+        return last is None or now - last >= timedelta(minutes=interval)
 
     async def _run_speedtest(self) -> None:
         # LAN counters per phase: DSL / 5G split (with receiver) and whether the host is
@@ -346,6 +355,11 @@ class Monitor:
             self._log.append_speedtest(sample)
             log.info("Speed test: %.0f / %.0f Mbit/s, %.0f ms, host %s", sample.down_bps / _BITS_PER_MEGABIT,
                      sample.up_bps / _BITS_PER_MEGABIT, sample.latency_ms, link.value if link else "unknown")
+        except RateLimited as error:
+            # Cloudflare's limit for automated tests: wait as long as it asks.
+            log.warning("Speed test refused: %s", error)
+            self._speedtest_blocked_until = datetime.now(UTC) + timedelta(seconds=error.retry_after_seconds)
+            self.speedtest_error = f"Speed test refused: {error}."
         except _NETWORK_ERRORS as error:
             log.error("Speed test failed: %s", error)
             self.speedtest_error = f"Speed test failed: {error}"

@@ -13,6 +13,7 @@ from routerlink.app.monitor import Monitor
 from routerlink.app.store import Choice, Settings, Store
 from routerlink.domain.samples import HostLink, StatusSample
 from routerlink.host_network import InterfaceKind
+from routerlink.speedtest import RateLimited
 from routerlink.domain.status import LineStatus
 from routerlink.speedport.varlist import VarList
 
@@ -186,4 +187,29 @@ async def test_speed_test_tells_wired_from_wifi(tmp_path: Path, receiver: bool, 
     monitor.start_speedtest()
     await settle()
     assert monitor.last_speedtest is not None and monitor.last_speedtest.host_link == expected
+    await monitor.stop()
+
+
+async def test_failed_scheduled_test_is_not_retried_every_minute(tmp_path: Path) -> None:
+    monitor = await started(tmp_path, FakeRouter(), tester=FakeTester(fail=httpx.ConnectError("offline")))
+    monitor.update_settings(Settings(DEFAULTS.router_url, 3600, 3600, speedtest_interval=60))
+    now = datetime.now(UTC)
+    assert monitor._speedtest_due(now)
+    monitor.start_speedtest()
+    await settle()
+    assert monitor.speedtest_error is not None
+    assert not monitor._speedtest_due(now + timedelta(minutes=1))
+    assert monitor._speedtest_due(now + timedelta(minutes=61))
+    await monitor.stop()
+
+
+async def test_rate_limit_postpones_scheduled_tests(tmp_path: Path) -> None:
+    monitor = await started(tmp_path, FakeRouter(), tester=FakeTester(fail=RateLimited(retry_after_seconds=7200)))
+    monitor.update_settings(Settings(DEFAULTS.router_url, 3600, 3600, speedtest_interval=30))
+    now = datetime.now(UTC)
+    monitor.start_speedtest()
+    await settle()
+    assert monitor.speedtest_error is not None and "Cloudflare" in monitor.speedtest_error
+    assert not monitor._speedtest_due(now + timedelta(minutes=61))
+    assert monitor._speedtest_due(now + timedelta(minutes=121))
     await monitor.stop()

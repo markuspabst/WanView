@@ -29,6 +29,24 @@ _READ_SIZE = 64 * 1024
 _TIMEOUT_SECONDS = 30.0
 _BITS_PER_BYTE = 8
 _MS_PER_SECOND = 1000
+_TOO_MANY_REQUESTS = 429
+# Used when a 429 carries no usable Retry-After.
+_DEFAULT_RETRY_AFTER_SECONDS = 3600
+
+
+class RateLimited(Exception):
+    """Cloudflare refused the test (HTTP 429); retry after `retry_after_seconds`."""
+
+    def __init__(self, retry_after_seconds: int) -> None:
+        super().__init__(f"Cloudflare rate limit, retry in {retry_after_seconds // 60} min")
+        self.retry_after_seconds = retry_after_seconds
+
+
+def _check(response: httpx.Response) -> None:
+    if response.status_code == _TOO_MANY_REQUESTS:
+        retry_after = response.headers.get("Retry-After", "")
+        raise RateLimited(int(retry_after) if retry_after.isdigit() else _DEFAULT_RETRY_AFTER_SECONDS)
+    response.raise_for_status()
 
 
 @dataclass(frozen=True)
@@ -57,7 +75,7 @@ class SpeedTester:
         for _ in range(_LATENCY_PROBES):
             start = time.perf_counter()
             response = await http.get("/__down", params={"bytes": 0})
-            response.raise_for_status()
+            _check(response)
             rounds.append((time.perf_counter() - start) * _MS_PER_SECOND)
         return statistics.median(rounds)
 
@@ -77,7 +95,7 @@ class SpeedTester:
         moved = 0
         while time.perf_counter() < deadline:
             async with http.stream("GET", "/__down", params={"bytes": _DOWNLOAD_CHUNK_BYTES}) as response:
-                response.raise_for_status()
+                _check(response)
                 async for chunk in response.aiter_bytes(_READ_SIZE):
                     moved += len(chunk)
                     if time.perf_counter() >= deadline:
@@ -89,6 +107,6 @@ class SpeedTester:
         payload = bytes(_UPLOAD_CHUNK_BYTES)
         while time.perf_counter() < deadline:
             response = await http.post("/__up", content=payload)
-            response.raise_for_status()
+            _check(response)
             moved += len(payload)
         return moved
