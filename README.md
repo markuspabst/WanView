@@ -20,25 +20,46 @@ data volume /data: logs/*.csv, settings.json, routers.json, secrets.json
 | Router device password (env or dashboard), bound to the router's serial number | DSL line details, 5G receiver cells, hybrid bonding, 5G overflow, LAN traffic, router restart |
 | External 5G receiver on LAN1 ("Link") with hybrid bonding | 5G sections, overflow and DSL estimate |
 
-## Run with Docker Compose
+## Install with Docker
+
+Image: `ghcr.io/markuspabst/routerlink` for `linux/amd64` and `linux/arm64`, built by GitHub Actions (`.github/workflows/docker.yml`): `latest` follows `main`, version tags (`v1.2.3`) give `1.2.3` and `1.2`.
+
+### docker run
 
 ```sh
-cp .env.example .env          # set ROUTER_PASSWORD and DASHBOARD_PASSWORD
-mkdir -p data && sudo chown 1000 data   # the container runs as uid 1000
-docker compose up -d --build
+mkdir -p routerlink/data && sudo chown 1000 routerlink/data   # the container runs as uid 1000
+docker run -d --name routerlink --restart unless-stopped -p 8080:8080 \
+  -v "$PWD/routerlink/data:/data" \
+  -e ROUTER_PASSWORD='device password' -e DASHBOARD_PASSWORD='dashboard password' \
+  ghcr.io/markuspabst/routerlink:latest
 ```
 
-Dashboard: `http://<host>:8080`. Logs: `docker compose logs -f`.
+Dashboard: `http://<host>:8080`. Both passwords are optional: the router password can be entered in the dashboard, and without a dashboard password the dashboard is open to the network.
 
-If `speedport.ip` does not resolve inside the container, set `ROUTER_URL` to the router's IP address (e.g. `https://192.168.2.1`).
+### Docker Compose
+
+Only `docker-compose.yml` is needed (optionally a `.env` from `.env.example`):
+
+```sh
+mkdir -p data && sudo chown 1000 data
+docker compose up -d          # update: docker compose pull && docker compose up -d
+```
 
 ### Synology (Container Manager)
 
-1. Copy this folder to the NAS, e.g. `/volume1/docker/routerlink`, and create `.env` from `.env.example`.
-2. Create the `data` subfolder and give uid 1000 write access (Control Panel or `sudo chown 1000 data` via SSH).
-3. Container Manager → Project → Create → path `/volume1/docker/routerlink`, source: existing `docker-compose.yml` → Build and start.
+1. File Station: create `docker/routerlink/data`.
+2. Container Manager → Project → Create: name `routerlink`, path `docker/routerlink`, source "Create docker-compose.yml", paste this repository's `docker-compose.yml`.
+3. Data folder permissions: either give uid 1000 write access (`sudo chown 1000 /volume1/docker/routerlink/data` via SSH), or uncomment `user:` in the compose file with your NAS user's IDs (SSH: `id <user>`, often `1026:100`).
+4. Set passwords in the compose file under `environment:` (replace the `${…:-}` values) or in a `.env` file next to it, then build/start the project. Update: Project → Action → Build (pulls the latest image).
 
-For another architecture than the host's: `docker buildx build --platform linux/amd64,linux/arm64 -t routerlink .`
+If `speedport.ip` does not resolve inside the container, set `ROUTER_URL` to the router's IP address (e.g. `https://192.168.2.1`). For the speed test's wired/Wi-Fi detection, uncomment `network_mode: host`.
+
+### Build the image yourself
+
+```sh
+docker build -t ghcr.io/markuspabst/routerlink:latest .
+# other architecture: docker buildx build --platform linux/amd64,linux/arm64 -t routerlink .
+```
 
 ## Run without Docker
 
@@ -126,7 +147,7 @@ The normal sync rate is the median of the last 7 days of logged status polls (pe
 
 ## Limitations
 
-- Tested with Speedport Smart 4 Typ A, firmware 010139.5.0.001.1, from macOS (Python 3.13). The Docker image itself has not been built or run yet.
+- Tested with Speedport Smart 4 Typ A, firmware 010139.5.0.001.1, from macOS (Python 3.13). The Docker image is built by GitHub Actions; it has not been run on a NAS yet.
 - The router's self-signed certificate is not verified (the client only talks to the configured router address).
 - The DSL estimate is too low while Wi-Fi clients transfer and too high during local transfers between wired devices; no Wi-Fi or WAN byte counters are available.
 - The router occasionally reports DSL sync 0 while online; such readings are treated as no value.

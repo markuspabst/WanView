@@ -1,11 +1,25 @@
 services:
   routerlink:
-    build: .
-    image: routerlink:latest
+    image: ghcr.io/markuspabst/routerlink:latest
     container_name: routerlink
     restart: unless-stopped
     ports:
       - "8080:8080"
-    env_file: .env
+    # Values come from a .env file next to this file if present (see .env.example),
+    # otherwise the defaults after ":-". Replace them here if you prefer no .env file.
+    environment:
+      ROUTER_URL: ${ROUTER_URL:-https://speedport.ip}
+      ROUTER_PASSWORD: ${ROUTER_PASSWORD:-}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      STATUS_INTERVAL: ${STATUS_INTERVAL:-30}
+      DETAILS_INTERVAL: ${DETAILS_INTERVAL:-300}
+      SPEEDTEST_INTERVAL: ${SPEEDTEST_INTERVAL:-0}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - ./data:/data
+    # The container runs as uid 1000. If ./data belongs to another user (Synology: your
+    # NAS user, often 1026:100), run as that user instead:
+    # user: "1026:100"
+    # Optional: lets speed tests see whether the host is wired or on Wi-Fi.
+    # The `ports` mapping is then ignored; the dashboard listens on the host's PORT (8080).
+    # network_mode: host
