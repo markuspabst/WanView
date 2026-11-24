@@ -152,6 +152,6 @@ The normal sync rate is the median of the last 7 days of logged status polls (pe
 - Tested with Speedport Smart 4 Typ A, firmware 010139.5.0.001.1, from macOS (Python 3.13). The Docker image is built by GitHub Actions; it has not been run on a NAS yet.
 - The router's self-signed certificate is not verified (the client only talks to the configured router address).
 - The DSL estimate is too low while Wi-Fi clients transfer and too high during local transfers between wired devices; no Wi-Fi or WAN byte counters are available.
-- The router occasionally reports DSL sync 0 while online; such readings are treated as no value.
+- The router occasionally reports DSL sync 0 while online, the DSL page 0.0 dB for missing upstream levels, and the receiver RSRP/RSRQ 0.0 without a measurement; all are treated as no value (also in older log rows shown in the history).
 - Router restart: if the router restarts before answering, a failure is shown although it restarts.
 - The router's e-mail notification on security events (which may include logins) is not changed by Routerlink; settings pages under `/data/*.json` return empty lists to this client (cause unknown).

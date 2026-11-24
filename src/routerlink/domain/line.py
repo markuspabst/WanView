@@ -19,6 +19,12 @@ _FEC_ERRORS = 10
 
 # The receiver page uses "-" for "no value".
 _NO_VALUE = "-"
+# The DSL page reports 0.0 dB where it has no measurement (seen for upstream
+# attenuation and signal level); no real DSL line has 0 dB attenuation.
+_NO_LEVEL_DB = 0.0
+# The receiver reports RSRP and RSRQ 0.0 when it has no measurement (real values are
+# far below 0), as Status.json does for its signal levels.
+_NO_MEASUREMENT = 0.0
 
 
 @dataclass(frozen=True)
@@ -41,8 +47,8 @@ class DSLDirection:
             actual_rate_kbps=integer(row(_ACTUAL_RATE)),
             attainable_rate_kbps=integer(row(_ATTAINABLE_RATE)),
             snr_margin_db=number(row(_SNR_MARGIN)),
-            signal_level_db=number(row(_SIGNAL_LEVEL)),
-            attenuation_db=number(row(_ATTENUATION)),
+            signal_level_db=_level(number(row(_SIGNAL_LEVEL))),
+            attenuation_db=_level(number(row(_ATTENUATION))),
             crc_errors=integer(row(_CRC_ERRORS)),
             hec_errors=integer(row(_HEC_ERRORS)),
             fec_errors=integer(row(_FEC_ERRORS)),
@@ -94,8 +100,8 @@ class ReceiverStatus:
         def cell(suffix: str) -> Cell:
             return Cell(
                 physical_cell_id=_value(page.string(f"Receiver_Physical_{suffix}")),
-                rsrp=number(page.string(f"Receiver_RSRP_{suffix}")),
-                rsrq=number(page.string(f"Receiver_RSRQ_{suffix}")),
+                rsrp=_measurement(number(page.string(f"Receiver_RSRP_{suffix}"))),
+                rsrq=_measurement(number(page.string(f"Receiver_RSRQ_{suffix}"))),
             )
 
         return cls(
@@ -104,6 +110,14 @@ class ReceiverStatus:
             nr=cell("5G"),
             lte=cell("LTE"),
         )
+
+
+def _measurement(value: float | None) -> float | None:
+    return None if value == _NO_MEASUREMENT else value
+
+
+def _level(value: float | None) -> float | None:
+    return None if value == _NO_LEVEL_DB else value
 
 
 def _value(raw: str | None) -> str | None:

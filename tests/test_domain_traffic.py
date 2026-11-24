@@ -31,6 +31,9 @@ def test_dsl_details_parse_hidden_status_page() -> None:
     assert details.downstream == DSLDirection(90000, 99367, 8.2, 19.7, 19.7, 12, 0, 14_302_101)
     assert details.upstream.snr_margin_db == 7.0
     assert details.upstream.fec_errors == 19990
+    # The page reports 0.0 dB upstream where it has no measurement.
+    assert details.upstream.attenuation_db is None
+    assert details.upstream.signal_level_db is None
 
 
 def test_receiver_parses_values_and_placeholders() -> None:
@@ -60,6 +63,11 @@ inte_face_speed[1] = 1000;
 inte_face_tx[1][1] = 1924008923;
 inte_face_rx[1][1] = 3973273581;
 """)
+
+
+def test_receiver_zero_means_no_measurement() -> None:
+    receiver = ReceiverStatus.from_page(EngineerPage('Receiver_RSRP_5G = "0.0";\nReceiver_RSRQ_5G = "0.0";'))
+    assert receiver.nr == Cell(None, None, None)
 
 
 def test_counters_parse_bytes_column() -> None:
