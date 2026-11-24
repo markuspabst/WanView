@@ -4,7 +4,16 @@ import pytest
 
 from routerlink.domain.line import DSLDetails
 from routerlink.domain.quality import Quality, crc_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality
-from routerlink.domain.samples import CRCErrorRate, LineSample, NormalSync, OverflowSample, SpeedTestSample, StatusSample
+from routerlink.domain.samples import (
+    CRCErrorRate,
+    HostLink,
+    LineSample,
+    NormalSync,
+    OverflowSample,
+    SpeedTestSample,
+    StatusSample,
+    link_from_router_ports,
+)
 from routerlink.domain.status import LineStatus
 from routerlink.domain.traffic import BondingStatus, LANCounters
 from routerlink.speedport.engineer_page import EngineerPage
@@ -131,9 +140,32 @@ def test_normal_sync_needs_enough_samples() -> None:
 
 def test_speed_test_sample_round_trip_and_split() -> None:
     sample = SpeedTestSample(TIME, 62.84, 112_000_000, 48_000_000, 27_000_000, None)
-    assert sample.csv_row == "2026-11-23T18:53:20Z,62.8,112000000,48000000,27000000,"
+    assert sample.csv_row == "2026-11-23T18:53:20Z,62.8,112000000,48000000,27000000,,"
     assert sample.dsl_down_bps == 85_000_000
     assert sample.dsl_up_bps is None
     restored = SpeedTestSample.from_csv(sample.csv_row)
     assert restored is not None and restored.down_bps == 112_000_000 and restored.latency_ms == 62.8
     assert SpeedTestSample.from_csv(SpeedTestSample.CSV_HEADER) is None
+
+
+def test_speed_test_host_link_round_trip_and_legacy_rows() -> None:
+    sample = SpeedTestSample(TIME, 20.0, 40_000_000, 30_000_000, None, None, HostLink.WIFI)
+    assert sample.csv_row.endswith(",wifi")
+    assert SpeedTestSample.from_csv(sample.csv_row) == sample
+    # Written before the host_link column existed.
+    legacy = SpeedTestSample.from_csv("2026-11-23T18:53:20Z,62.8,112000000,48000000,27000000,")
+    assert legacy is not None and legacy.host_link is None and legacy.mobile_down_bps == 27_000_000
+
+
+@pytest.mark.parametrize(("lan_down", "lan_up", "expected"), [
+    (41_000_000, 46_000_000, HostLink.LAN_PORT),     # test traffic through a LAN port
+    (60_000_000, 1_000_000, HostLink.LAN_PORT),      # plus other LAN traffic: still LAN port
+    (3_000_000, 600_000, HostLink.ROUTER_WIFI),      # test traffic not on any LAN port
+    (None, 600_000, None),                           # no router login: unknown
+])
+def test_link_from_router_ports(lan_down: int | None, lan_up: int | None, expected: HostLink | None) -> None:
+    assert link_from_router_ports(41_000_000, 47_000_000, lan_down, lan_up) == expected
+
+
+def test_only_wifi_links_limit_the_result() -> None:
+    assert [link for link in HostLink if link.limits_result] == [HostLink.WIFI, HostLink.ROUTER_WIFI]

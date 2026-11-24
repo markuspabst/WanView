@@ -82,7 +82,15 @@ The router allows one login at a time. Line details (DSL, receiver, bonding, LAN
 
 "Run" on the Speed test tab measures latency, download and upload against Cloudflare's speed test endpoints (`speed.cloudflare.com`, plain HTTPS; their terms for automated use are not verified). Each throughput phase runs 4 parallel streams for 8 s; the line is saturated for about 20 s and a test moves roughly 100–250 MB, partly over 5G. Automatic tests: Settings → "Speed test every (min)", 0 = off (default, or `SPEEDTEST_INTERVAL`), otherwise 30–1440 minutes.
 
-With a set-up router and a 5G receiver, the receiver port's byte counters are read before and after each phase, so the result is split into DSL and 5G (other traffic during the test counts too). This holds the router login for the test (about 40 s with the readings). Results: `/data/logs/<date>-speedtest.csv` (`time,latency_ms,down_bps,up_bps,mobile_down_bps,mobile_up_bps`) and a History chart. The result measures the host's own connection: a host on Wi-Fi measures Wi-Fi, not the line.
+With a set-up router and a 5G receiver, the receiver port's byte counters are read before and after each phase, so the result is split into DSL and 5G (other traffic during the test counts too). This holds the router login for the test (about 40 s with the readings). Results: `/data/logs/<date>-speedtest.csv` (`time,latency_ms,down_bps,up_bps,mobile_down_bps,mobile_up_bps`) and a History chart. The result measures the host's own connection: a host on Wi-Fi measures Wi-Fi, not the line. Each result is marked:
+
+| Connection | Source | Meaning |
+|---|---|---|
+| wired / Wi-Fi | the host's own network interface (Linux: default route, `/sys/class/net`; macOS: `route`, `networksetup`) | reliable; in Docker only with `network_mode: host` (the default bridge network shows a virtual interface: unknown) |
+| router Wi-Fi | router LAN port counters during the test (needs the router login) | the test traffic did not pass a LAN port: the host is on the router's Wi-Fi |
+| LAN port (cable or mesh) | same | the traffic entered through a LAN port: cable, or Wi-Fi via a mesh access point on that port; inconclusive |
+
+Wi-Fi results show "limits the result". In the history, Wi-Fi tests have their own "Download / upload over Wi-Fi" panel in violet/pink (shown only when the range contains any), the main chart shows the other tests, and the latency chart draws Wi-Fi tests in violet.
 
 ## Dashboard
 

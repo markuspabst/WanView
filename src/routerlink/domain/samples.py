@@ -4,6 +4,7 @@ Times are ISO 8601 UTC with seconds, e.g. `2026-11-23T18:53:20Z`."""
 import statistics
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from routerlink.domain.line import DSLDetails, ReceiverStatus
 from routerlink.domain.status import LineStatus
@@ -245,10 +246,45 @@ class OverflowSample:
                    _int(fields[6]), _int(fields[7]), _int(fields[8]), _int(fields[9]))
 
 
+class HostLink(StrEnum):
+    """How the host running the speed test reaches the router.
+
+    WIRED / WIFI come from the host's own network interface (reliable). ROUTER_WIFI /
+    LAN_PORT come from the router's port counters: traffic via a LAN port can still be
+    Wi-Fi behind a mesh access point or other device on that port.
+    """
+
+    WIRED = "wired"
+    WIFI = "wifi"
+    ROUTER_WIFI = "router-wifi"
+    LAN_PORT = "lan-port"
+
+    @property
+    def limits_result(self) -> bool:
+        """The result measures Wi-Fi rather than the line."""
+        return self in (HostLink.WIFI, HostLink.ROUTER_WIFI)
+
+
+# Wired client ports must carry at least this share of the measured test traffic for
+# the traffic to count as entering via a LAN port. Other wired traffic only adds to
+# it, so a lower share means the test traffic took another path: the router's Wi-Fi.
+_LAN_PORT_SHARE = 0.5
+
+
+def link_from_router_ports(down_bps: int, up_bps: int, lan_down_bps: int | None,
+                           lan_up_bps: int | None) -> HostLink | None:
+    """None when the LAN port counters are unknown (no router login)."""
+    if lan_down_bps is None or lan_up_bps is None:
+        return None
+    via_lan = lan_down_bps >= down_bps * _LAN_PORT_SHARE or lan_up_bps >= up_bps * _LAN_PORT_SHARE
+    return HostLink.LAN_PORT if via_lan else HostLink.ROUTER_WIFI
+
+
 @dataclass(frozen=True)
 class SpeedTestSample:
     """One internet speed test. The 5G share comes from the receiver port's counters
-    during each phase (other traffic in that time counts too); DSL is the rest."""
+    during each phase (other traffic in that time counts too); DSL is the rest.
+    `host_link` tells whether the result may be limited by Wi-Fi."""
 
     time: datetime
     latency_ms: float
@@ -256,9 +292,12 @@ class SpeedTestSample:
     up_bps: int
     mobile_down_bps: int | None
     mobile_up_bps: int | None
+    host_link: HostLink | None = None
 
-    CSV_HEADER = "time,latency_ms,down_bps,up_bps,mobile_down_bps,mobile_up_bps"
-    _FIELD_COUNT = 6
+    CSV_HEADER = "time,latency_ms,down_bps,up_bps,mobile_down_bps,mobile_up_bps,host_link"
+    _FIELD_COUNT = 7
+    # Files written before `host_link` existed.
+    _LEGACY_FIELD_COUNT = 6
 
     @property
     def dsl_down_bps(self) -> int | None:
@@ -271,13 +310,15 @@ class SpeedTestSample:
     @property
     def csv_row(self) -> str:
         return _row([_time(self.time), round(self.latency_ms, 1), self.down_bps, self.up_bps,
-                     self.mobile_down_bps, self.mobile_up_bps])
+                     self.mobile_down_bps, self.mobile_up_bps, self.host_link.value if self.host_link else ""])
 
     @classmethod
     def from_csv(cls, row: str) -> "SpeedTestSample | None":
-        fields = _fields(row, cls._FIELD_COUNT)
+        fields = _fields(row, cls._FIELD_COUNT) or _fields(row, cls._LEGACY_FIELD_COUNT)
         time = _parse_time(fields[0]) if fields else None
         latency, down, up = (_float(fields[1]), _int(fields[2]), _int(fields[3])) if fields else (None, None, None)
         if fields is None or time is None or latency is None or down is None or up is None:
             return None
-        return cls(time, latency, down, up, _int(fields[4]), _int(fields[5]))
+        link = fields[6] if len(fields) == cls._FIELD_COUNT else ""
+        return cls(time, latency, down, up, _int(fields[4]), _int(fields[5]),
+                   HostLink(link) if link in HostLink._value2member_map_ else None)

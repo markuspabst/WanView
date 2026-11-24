@@ -25,19 +25,28 @@ import httpx
 from routerlink.app.data_log import DataLog
 from routerlink.app.store import Choice, KnownRouter, Settings, Store
 from routerlink.domain.line import DSL_PAGE, RECEIVER_PAGE, DSLDetails, ReceiverStatus
-from routerlink.domain.samples import CRCErrorRate, LineSample, NormalSync, OverflowSample, SpeedTestSample, StatusSample
+from routerlink.domain.samples import (
+    CRCErrorRate,
+    LineSample,
+    NormalSync,
+    OverflowSample,
+    SpeedTestSample,
+    StatusSample,
+    HostLink,
+    link_from_router_ports,
+)
 from routerlink.domain.status import LineStatus, RouterModel
 from routerlink.domain.traffic import (
     BONDING_PAGE,
     LAN_PAGE,
-    RECEIVER_PORT,
     BondingStatus,
+    HybridTrafficRate,
     LANCounters,
     LANTrafficRate,
-    bits_per_second,
 )
 from routerlink.speedport.client import REBOOT_SECONDS, SpeedportClient
 from routerlink.speedport.errors import SpeedportError
+from routerlink.host_network import InterfaceKind, default_interface_kind
 from routerlink.speedtest import SpeedTester
 
 log = logging.getLogger(__name__)
@@ -58,6 +67,7 @@ _SECONDS_PER_MINUTE = 60
 # The last result shown after a restart comes from the log of this window.
 _SPEEDTEST_HISTORY = timedelta(days=7)
 _BITS_PER_MEGABIT = 1_000_000
+_HOST_LINKS = {InterfaceKind.WIRED: HostLink.WIRED, InterfaceKind.WIFI: HostLink.WIFI}
 
 
 @dataclass
@@ -79,10 +89,12 @@ class Readings:
 class Monitor:
     def __init__(self, store: Store, data_log: DataLog, initial_password: str | None,
                  client_factory: Callable[[str, str | None], SpeedportClient] = SpeedportClient,
-                 speed_tester: SpeedTester | None = None) -> None:
-        """`client_factory(base_url, password)` creates router clients; both it and
-        `speed_tester` are replaceable in tests."""
+                 speed_tester: SpeedTester | None = None,
+                 host_interface_kind: Callable[[], InterfaceKind | None] = default_interface_kind) -> None:
+        """`client_factory(base_url, password)` creates router clients; it, `speed_tester` and
+        `host_interface_kind` are replaceable in tests."""
         self._make_client = client_factory
+        self._host_interface_kind = host_interface_kind
         self._speed_tester = speed_tester or SpeedTester()
         self._store = store
         self._log = data_log
@@ -290,42 +302,56 @@ class Monitor:
                 self.start_speedtest()
 
     async def _run_speedtest(self) -> None:
-        # Counter readings per phase for the DSL / 5G split; only with login and a receiver.
-        split = self._may_use_login() and self.readings.status is not None and self.readings.status.has_receiver
+        # LAN counters per phase: DSL / 5G split (with receiver) and whether the host is
+        # wired or on Wi-Fi. Needs the router login.
+        read_counters = self._may_use_login()
+        has_receiver = self.readings.status is not None and self.readings.status.has_receiver
         readings: dict[tuple[str, str], tuple[LANCounters, float]] = {}
 
         async def around_phase(phase: str, edge: str) -> None:
-            if split:
+            if read_counters:
                 counters = LANCounters.from_page(await self._client.fetch_engineer_page(LAN_PAGE))
                 readings[(phase, edge)] = (counters, time.monotonic())
 
-        def mobile_bps(phase: str, direction: str) -> int | None:
+        def phase_rate(phase: str) -> LANTrafficRate | None:
             if (phase, "start") not in readings or (phase, "end") not in readings:
                 return None
             (before, start), (after, end) = readings[(phase, "start")], readings[(phase, "end")]
-            old, new = before.port(RECEIVER_PORT), after.port(RECEIVER_PORT)
-            if old is None or new is None:
+            return LANTrafficRate.between(before, after, end - start)
+
+        def mobile_bps(rate: LANTrafficRate | None, direction: str) -> int | None:
+            if rate is None or not has_receiver:
                 return None
-            # Seen from the router: received from the 5G receiver is 5G download.
-            if direction == "down":
-                return bits_per_second(old.rx_bytes, new.rx_bytes, end - start)
-            return bits_per_second(old.tx_bytes, new.tx_bytes, end - start)
+            hybrid = HybridTrafficRate.from_lan(rate)
+            return hybrid.mobile_down_bps if direction == "down" else hybrid.mobile_up_bps
+
+        def wired_bps(rate: LANTrafficRate | None, direction: str) -> int | None:
+            if rate is None:
+                return None
+            ports = HybridTrafficRate.from_lan(rate).client_ports if has_receiver else rate.ports
+            return sum((port.down_bps if direction == "down" else port.up_bps) or 0 for port in ports)
 
         try:
             measurement = await self._speed_tester.run(around_phase)
+            down_rate, up_rate = phase_rate("download"), phase_rate("upload")
+            # The host's own interface is reliable; the router's port counters cannot see Wi-Fi
+            # behind a mesh access point on a LAN port.
+            kind = self._host_interface_kind()
+            link = _HOST_LINKS[kind] if kind else link_from_router_ports(
+                measurement.down_bps, measurement.up_bps, wired_bps(down_rate, "down"), wired_bps(up_rate, "up"))
             sample = SpeedTestSample(datetime.now(UTC), measurement.latency_ms, measurement.down_bps,
-                                     measurement.up_bps, mobile_bps("download", "down"), mobile_bps("upload", "up"))
+                                     measurement.up_bps, mobile_bps(down_rate, "down"), mobile_bps(up_rate, "up"), link)
             self.last_speedtest = sample
             self.speedtest_error = None
             self._log.append_speedtest(sample)
-            log.info("Speed test: %.0f / %.0f Mbit/s, %.0f ms", sample.down_bps / _BITS_PER_MEGABIT,
-                     sample.up_bps / _BITS_PER_MEGABIT, sample.latency_ms)
+            log.info("Speed test: %.0f / %.0f Mbit/s, %.0f ms, host %s", sample.down_bps / _BITS_PER_MEGABIT,
+                     sample.up_bps / _BITS_PER_MEGABIT, sample.latency_ms, link.value if link else "unknown")
         except _NETWORK_ERRORS as error:
             log.error("Speed test failed: %s", error)
             self.speedtest_error = f"Speed test failed: {error}"
         finally:
             self._speedtest_task = None
-            if split and self._traffic_task is None:
+            if read_counters and self._traffic_task is None:
                 await self._client.logout()
 
     # Live traffic

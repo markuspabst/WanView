@@ -155,6 +155,15 @@ function renderSpeedtest(state) {
                     "5G share from the receiver port during the test; other traffic in that time counts too."],
                    ["DSL / 5G ↑", pair(megabits(last.dslUp), rate(last.mobileUp))]);
     }
+    const links = {
+      wired: ["wired", "excellent", "The host's network interface is wired: the result measures the line."],
+      wifi: ["Wi-Fi: limits the result", "fair", "The host's network interface is Wi-Fi: the result is limited by Wi-Fi, not the line."],
+      "router-wifi": ["router Wi-Fi: limits the result", "fair", "The test traffic did not pass a router LAN port: the host is on the router's Wi-Fi, so the result is limited by Wi-Fi."],
+      "lan-port": ["LAN port (cable or mesh)", null, "The test traffic entered through a router LAN port: by cable, or by Wi-Fi through a mesh access point on that port. The host's own interface could not be checked."],
+    };
+    const [linkText, linkRating, linkHelp] = links[last.hostLink]
+      || ["unknown", null, "Needs Linux with the host's network visible (Docker: network_mode: host) or the router login."];
+    entries.push(["Connection", linkText, linkRating, linkHelp]);
     entries.push(["Latency", `${Math.round(last.latencyMs)} ms`],
                  ["Measured", new Date(last.time).toLocaleString([], { dateStyle: "short", timeStyle: "short" })]);
   }
@@ -377,7 +386,11 @@ function wireActions() {
 // History charts (SVG, one measure per chart, shared time axis)
 
 const SVG = "http://www.w3.org/2000/svg";
-const CHART = { width: 1000, height: 160, left: 44, right: 8, top: 8, bottom: 20 };
+// Drawing units: width is stretched to the card, height matches the plot's CSS height in px.
+const CHART = { width: 1000, height: 170, top: 6, bottom: 6 };
+const TIME_LABEL_FRACTIONS = [0, 0.25, 0.5, 0.75, 1];
+const TIME_LABEL_DAY_LIMIT_MS = 36 * 3600 * 1000;   // up to this range: times of day only
+const TICK_TARGET = 4;
 const GAP_FACTOR = 3;
 // Titles of collapsed charts, kept across reloads and history refreshes.
 const COLLAPSED_KEY = "routerlink.collapsedCharts";
@@ -402,9 +415,25 @@ function svgElement(tag, attributes) {
   return node;
 }
 
-// Options: `dots` marks every point (sparse series such as speed tests); `bands` shades
-// [startMs, endMs] ranges red (problems); `note` is extra header text.
-function chart(title, unit, names, points, start, end, maxGapMs, { dots = false, bands = [], note = null } = {}) {
+// Round axis values: steps of 1, 2 or 5 × 10^n, about TICK_TARGET of them inside [low, high].
+function niceTicks(low, high) {
+  const rough = (high - low) / TICK_TARGET;
+  const magnitude = 10 ** Math.floor(Math.log10(rough));
+  const step = [1, 2, 5, 10].map((m) => m * magnitude).find((candidate) => candidate >= rough);
+  const values = [];
+  for (let v = Math.ceil(low / step) * step; v <= high; v += step) values.push(Math.round(v / step) * step);
+  return { values, decimals: Math.max(0, -Math.floor(Math.log10(step))) };
+}
+
+const SERIES_COLORS = ["var(--series1)", "var(--series2)"];
+const WIFI_COLORS = ["var(--wifi1)", "var(--wifi2)"];
+
+// Options: `dots` marks every point (sparse series such as speed tests; points with
+// `wifi: true` are marked in the Wi-Fi colour); `bands` shades [startMs, endMs] ranges
+// red (problems); `note` is extra header text; `wifiNote` adds a legend entry in the
+// Wi-Fi colour; `palette` replaces the series colours.
+function chart(title, unit, names, points, start, end, maxGapMs,
+               { dots = false, bands = [], note = null, wifiNote = null, palette = SERIES_COLORS } = {}) {
   const box = element("details", { class: "chart" });
   box.open = !collapsedCharts().has(title);
   box.addEventListener("toggle", () => rememberCollapsed(title, !box.open));
@@ -412,7 +441,8 @@ function chart(title, unit, names, points, start, end, maxGapMs, { dots = false,
   heading.append(element("span", {}, title), element("span", { class: "muted" }, unit));
   if (note) heading.append(element("span", { class: "muted note" }, note));
   const legend = element("span", { class: "legend" });
-  names.forEach((name, i) => legend.append(element("span", { class: `s${i + 1}` }, `■ ${name}  `)));
+  names.forEach((name, i) => legend.append(element("span", { style: `color: ${palette[i]}` }, `■ ${name}  `)));
+  if (wifiNote) legend.append(element("span", { style: `color: ${WIFI_COLORS[0]}` }, `● ${wifiNote}`));
   heading.append(legend);
   box.append(heading);
 
@@ -425,31 +455,35 @@ function chart(title, unit, names, points, start, end, maxGapMs, { dots = false,
   if (low === high) { low -= 1; high += 1; }
   const pad = (high - low) * 0.08;
   low -= pad; high += pad;
+  const ticks = niceTicks(low, high);
 
+  // The lines are drawn in a viewBox stretched to the card width (vertical scale 1:1);
+  // labels are HTML on top of it, so text is never distorted by the stretching.
+  const plot = element("div", { class: "plot" });
   const svg = svgElement("svg", { viewBox: `0 0 ${CHART.width} ${CHART.height}`, preserveAspectRatio: "none" });
-  const plotWidth = CHART.width - CHART.left - CHART.right, plotHeight = CHART.height - CHART.top - CHART.bottom;
-  const x = (t) => CHART.left + ((t - start) / (end - start)) * plotWidth;
+  const plotHeight = CHART.height - CHART.top - CHART.bottom;
+  const x = (t) => ((t - start) / (end - start)) * CHART.width;
   const y = (v) => CHART.top + (1 - (v - low) / (high - low)) * plotHeight;
 
   for (const [from, to] of bands) {
-    const left = Math.max(x(from), CHART.left), right = Math.min(x(to), CHART.width - CHART.right);
+    const left = Math.max(x(from), 0), right = Math.min(x(to), CHART.width);
     if (right > left) {
       svg.append(svgElement("rect", { x: left, y: CHART.top, width: right - left, height: plotHeight, class: "band" }));
     }
   }
-  for (const tick of [low + pad, (low + high) / 2, high - pad]) {
-    svg.append(svgElement("line", { x1: CHART.left, x2: CHART.width - CHART.right, y1: y(tick), y2: y(tick), class: "axis" }));
-    const label = svgElement("text", { x: CHART.left - 4, y: y(tick) + 3, "text-anchor": "end" });
-    label.textContent = Math.abs(tick) >= 100 ? tick.toFixed(0) : tick.toFixed(1);
-    svg.append(label);
+  for (const tick of ticks.values) {
+    svg.append(svgElement("line", { x1: 0, x2: CHART.width, y1: y(tick), y2: y(tick), class: "axis",
+                                    "vector-effect": "non-scaling-stroke" }));
+    plot.append(element("span", { class: "y-label", style: `top: ${y(tick)}px` }, tick.toFixed(ticks.decimals)));
   }
-  for (const fraction of [0, 0.5, 1]) {
+  const shortRange = end - start <= TIME_LABEL_DAY_LIMIT_MS;
+  for (const fraction of TIME_LABEL_FRACTIONS) {
     const t = start + (end - start) * fraction;
-    const label = svgElement("text", { x: x(t), y: CHART.height - 4, "text-anchor": fraction === 0 ? "start" : fraction === 1 ? "end" : "middle" });
-    label.textContent = new Date(t).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
-    svg.append(label);
+    const text = new Date(t).toLocaleString([], shortRange ? { hour: "2-digit", minute: "2-digit" }
+                                                           : { weekday: "short", hour: "2-digit", minute: "2-digit" });
+    const align = fraction === 0 ? "start" : fraction === 1 ? "end" : "middle";
+    plot.append(element("span", { class: `x-label ${align}`, style: `left: ${fraction * 100}%` }, text));
   }
-
   names.forEach((_, series) => {
     let path = "", previous = null;
     for (const point of points) {
@@ -459,17 +493,24 @@ function chart(title, unit, names, points, start, end, maxGapMs, { dots = false,
       path += `${breaks ? "M" : "L"}${x(point.time).toFixed(1)},${y(value).toFixed(1)}`;
       previous = point.time;
     }
-    svg.append(svgElement("path", { d: path, fill: "none", stroke: `var(--series${series + 1})`, "stroke-width": 1.5,
+    svg.append(svgElement("path", { d: path, fill: "none", stroke: palette[series], "stroke-width": 1.5,
                                     "vector-effect": "non-scaling-stroke" }));
     if (!dots) return;
     // Zero-length segments with round caps and a non-scaling stroke stay round although
     // the chart is stretched to the card width.
-    const marks = points.filter((p) => p.values[series] !== null && p.values[series] !== undefined)
+    const marks = (wifi) => points
+      .filter((p) => Boolean(p.wifi) === wifi && p.values[series] !== null && p.values[series] !== undefined)
       .map((p) => `M${x(p.time).toFixed(1)},${y(p.values[series]).toFixed(1)}l0,0`).join("");
-    svg.append(svgElement("path", { d: marks, stroke: `var(--series${series + 1})`, "stroke-width": 7,
-                                    "stroke-linecap": "round", "vector-effect": "non-scaling-stroke" }));
+    for (const [wifi, color] of [[false, palette[series]], [true, WIFI_COLORS[series] || WIFI_COLORS[0]]]) {
+      const d = marks(wifi);
+      if (d) {
+        svg.append(svgElement("path", { d, stroke: color, "stroke-width": 7, "stroke-linecap": "round",
+                                        "vector-effect": "non-scaling-stroke" }));
+      }
+    }
   });
-  box.append(svg);
+  plot.prepend(svg);
+  box.append(plot);
   return box;
 }
 
@@ -506,10 +547,23 @@ async function refreshHistory() {
     chart("SNR margin", "dB", ["↓ down", "↑ up"], series(h.line, (r) => [r[1], r[2]]), start, end, detailsGap),
   );
   // Tests are minutes to hours apart: connect them all, mark each one.
-  document.getElementById("charts-speedtest").replaceChildren(
-    chart("Download / upload", "Mbit/s", ["↓ down", "↑ up"], series(h.speedtest, (r) => [mbit(r[1]), mbit(r[2])]), start, end, Infinity, { dots: true }),
-    chart("Latency", "ms", ["latency"], series(h.speedtest, (r) => [r[3]]), start, end, Infinity, { dots: true }),
-  );
+  // Tests from a host on Wi-Fi measure Wi-Fi, not the line: they get their own panel in
+  // the Wi-Fi colours (only when there are any) and Wi-Fi-coloured latency points.
+  const onWifi = (r) => r[4] === "wifi" || r[4] === "router-wifi";
+  const tests = (rows, map) => rows.map((r) => ({ time: Date.parse(r[0]), values: map(r), wifi: onWifi(r) }));
+  const rates = (r) => [mbit(r[1]), mbit(r[2])];
+  const lineTests = h.speedtest.filter((r) => !onWifi(r)), wifiTests = h.speedtest.filter(onWifi);
+  const panels = [chart("Download / upload", "Mbit/s", ["↓ down", "↑ up"], tests(lineTests, rates), start, end, Infinity,
+                        { dots: true, note: wifiTests.length ? "without Wi-Fi tests" : null })];
+  if (wifiTests.length) {
+    // Whole panel in the Wi-Fi palette; the points need no extra marking there.
+    panels.push(chart("Download / upload over Wi-Fi", "Mbit/s", ["↓ down", "↑ up"],
+                      tests(wifiTests, rates).map((p) => ({ ...p, wifi: false })), start, end,
+                      Infinity, { dots: true, note: "limited by Wi-Fi, not the line", palette: WIFI_COLORS }));
+  }
+  panels.push(chart("Latency", "ms", ["latency"], tests(h.speedtest, (r) => [r[3]]), start, end, Infinity,
+                    { dots: true, wifiNote: wifiTests.length ? "Wi-Fi" : null }));
+  document.getElementById("charts-speedtest").replaceChildren(...panels);
   document.getElementById("charts-mobile").replaceChildren(
     chart("Receiver signal (RSRP)", "dBm", ["5G", "LTE"], series(h.status, (r) => [r[3], r[4]]), start, end, statusGap),
     bondingChart(h.overflow, start, end, detailsGap),

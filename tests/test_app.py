@@ -11,7 +11,8 @@ import httpx
 from routerlink.app.data_log import DataLog
 from routerlink.app.monitor import Monitor
 from routerlink.app.store import Choice, Settings, Store
-from routerlink.domain.samples import StatusSample
+from routerlink.domain.samples import HostLink, StatusSample
+from routerlink.host_network import InterfaceKind
 from routerlink.domain.status import LineStatus
 from routerlink.speedport.varlist import VarList
 
@@ -24,10 +25,11 @@ async def settle() -> None:
 
 
 async def started(tmp_path: Path, router: FakeRouter, initial_password: str | None = None,
-                  store: Store | None = None, tester: FakeTester | None = None) -> Monitor:
+                  store: Store | None = None, tester: FakeTester | None = None,
+                  host_kind: InterfaceKind | None = None) -> Monitor:
     store = store or Store(tmp_path, DEFAULTS)
     monitor = Monitor(store, DataLog(tmp_path / "logs"), initial_password, client_factory=router.client,
-                      speed_tester=tester or FakeTester())
+                      speed_tester=tester or FakeTester(), host_interface_kind=lambda: host_kind)
     monitor.start()
     await settle()
     return monitor
@@ -168,4 +170,20 @@ async def test_no_speed_test_while_paused(tmp_path: Path) -> None:
     monitor = await started(tmp_path, FakeRouter())
     monitor.pause()
     assert not monitor.start_speedtest()
+    await monitor.stop()
+
+
+@pytest.mark.parametrize(("receiver", "password", "host_kind", "expected"), [
+    (False, "secret", None, HostLink.LAN_PORT),              # the only port is a LAN client and carries the traffic
+    (True, "secret", None, HostLink.ROUTER_WIFI),            # the only port is the 5G receiver: no LAN client moved data
+    (False, None, None, None),                               # no router login, host unknown
+    (False, "secret", InterfaceKind.WIFI, HostLink.WIFI),    # the host's own interface wins (e.g. mesh Wi-Fi on a LAN port)
+    (False, None, InterfaceKind.WIRED, HostLink.WIRED),      # host check needs no router login
+])
+async def test_speed_test_tells_wired_from_wifi(tmp_path: Path, receiver: bool, password: str | None,
+                                                host_kind: InterfaceKind | None, expected: HostLink | None) -> None:
+    monitor = await started(tmp_path, FakeRouter(receiver=receiver), initial_password=password, host_kind=host_kind)
+    monitor.start_speedtest()
+    await settle()
+    assert monitor.last_speedtest is not None and monitor.last_speedtest.host_link == expected
     await monitor.stop()

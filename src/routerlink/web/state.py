@@ -149,6 +149,7 @@ def _speedtest(monitor: Monitor) -> dict:
             "time": _iso(last.time), "latencyMs": last.latency_ms, "down": last.down_bps, "up": last.up_bps,
             "mobileDown": last.mobile_down_bps, "mobileUp": last.mobile_up_bps,
             "dslDown": last.dsl_down_bps, "dslUp": last.dsl_up_bps,
+            "hostLink": last.host_link.value if last.host_link else None,
         },
     }
 
@@ -166,5 +167,7 @@ def history(data_log: DataLog, range_name: str) -> dict:
                       s.dsl_down_limit_kbps and s.dsl_down_limit_kbps * _KBIT,
                       s.dsl_up_limit_kbps and s.dsl_up_limit_kbps * _KBIT]
                      for s in data_log.overflow_samples(since)],
-        "speedtest": [[_iso(s.time), s.down_bps, s.up_bps, s.latency_ms] for s in data_log.speedtest_samples(since)],
+        # [time, down, up, latency ms, host link ("wired", "wifi" or None)]
+        "speedtest": [[_iso(s.time), s.down_bps, s.up_bps, s.latency_ms, s.host_link.value if s.host_link else None]
+                      for s in data_log.speedtest_samples(since)],
     }
