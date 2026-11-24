@@ -12,6 +12,8 @@ data volume /data: logs/*.csv, settings.json, routers.json, secrets.json
 
 ## Requirements
 
+User requirements with acceptance criteria and status: [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md). System requirements:
+
 | Requirement | Needed for |
 |---|---|
 | Docker (amd64 or arm64), e.g. Synology Container Manager; or Python 3.12+ | running |
