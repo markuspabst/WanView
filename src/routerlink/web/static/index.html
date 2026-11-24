@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Routerlink</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Routerlink</h1>
+    <span id="summary" class="summary"></span>
+    <nav>
+      <button id="pause" type="button">Pause</button>
+      <a id="router-link" class="button" target="_blank" rel="noopener" title="Pauses monitoring: the router allows one login">Router web interface</a>
+      <button id="restart-router" type="button" class="danger">Restart router…</button>
+    </nav>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" data-tab="overview">Overview</button>
+    <button type="button" role="tab" data-tab="dsl">DSL</button>
+    <button type="button" role="tab" data-tab="mobile" id="tab-mobile" hidden>5G/LTE</button>
+    <button type="button" role="tab" data-tab="speedtest">Speed test</button>
+    <button type="button" role="tab" data-tab="settings">Settings</button>
+  </div>
+
+  <main>
+    <section id="notices"></section>
+
+    <section id="setup" class="card notice" hidden>
+      <h2>New router: <span id="setup-name"></span></h2>
+      <p>Set it up to monitor it (device password optional; without it only status values are read), or ignore it.</p>
+      <form id="setup-form">
+        <input id="setup-password" type="password" autocomplete="off" placeholder="Device password (optional)">
+        <button type="submit">Set up</button>
+        <button id="setup-ignore" type="button">Ignore</button>
+      </form>
+    </section>
+
+    <div class="tab-panel" data-panel="overview">
+    <div class="grid">
+      <section class="card" id="card-connection"><h2>Connection</h2><dl></dl></section>
+      <section class="card" id="card-dsl"><h2>DSL</h2><dl></dl></section>
+      <section class="card" id="card-bonding"><h2>Hybrid bonding</h2><dl></dl></section>
+      <section class="card" id="card-receiver"><h2>5G receiver</h2><dl></dl></section>
+      <section class="card" id="card-traffic"><h2>LAN traffic (live)</h2><dl></dl></section>
+    </div>
+    <p id="updated" class="muted"></p>
+    </div>
+
+    <section class="tab-panel" data-panel="dsl">
+      <div class="panel-header">
+        <h2>DSL history</h2>
+        <span class="range">
+          <button type="button" data-range="day" class="selected">24 hours</button>
+          <button type="button" data-range="week">7 days</button>
+        </span>
+      </div>
+      <div id="charts-dsl" class="charts"></div>
+    </section>
+
+    <section class="tab-panel" data-panel="mobile">
+      <div class="panel-header">
+        <h2>5G/LTE history</h2>
+        <span class="range">
+          <button type="button" data-range="day" class="selected">24 hours</button>
+          <button type="button" data-range="week">7 days</button>
+        </span>
+      </div>
+      <div id="charts-mobile" class="charts"></div>
+    </section>
+
+    <section class="tab-panel" data-panel="speedtest">
+      <div class="panel-header">
+        <h2>Speed test</h2>
+        <span class="range">
+          <button type="button" data-range="day" class="selected">24 hours</button>
+          <button type="button" data-range="week">7 days</button>
+        </span>
+      </div>
+      <div class="charts">
+        <section class="card" id="card-speedtest">
+          <h2>Last result <button id="run-speedtest" type="button" class="header-action">Run</button></h2>
+          <dl></dl>
+        </section>
+        <div id="charts-speedtest"></div>
+      </div>
+    </section>
+
+    <section class="card tab-panel" data-panel="settings">
+      <h2>Settings</h2>
+      <form id="settings-form" class="settings">
+        <label>Router address <input id="router-url" type="url" required></label>
+        <label>Status every (s) <input id="status-interval" type="number" min="10" max="600" step="10" required></label>
+        <label>Line details every (s) <input id="details-interval" type="number" min="60" max="3600" step="60" required></label>
+        <label title="0 = off; each test loads the line for about 20 s">Speed test every (min, 0 = off) <input id="speedtest-interval" type="number" min="0" max="1440" step="30" required></label>
+        <button type="submit">Save</button>
+      </form>
+      <form id="password-form" class="settings">
+        <span id="password-router" class="muted"></span>
+        <input id="password" type="password" autocomplete="off" placeholder="Device password">
+        <button type="submit">Save password</button>
+        <button id="password-remove" type="button" class="danger">Remove password</button>
+      </form>
+      <h3>Set-up routers</h3>
+      <ul id="routers-setUp" class="routers"></ul>
+      <h3>Ignored routers</h3>
+      <ul id="routers-ignored" class="routers"></ul>
+      <p class="muted">A device password is stored for one router, identified by its serial number, and only sent to that router. Ignored routers are not monitored.</p>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

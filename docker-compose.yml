@@ -1,0 +1,11 @@
+services:
+  routerlink:
+    build: .
+    image: routerlink:latest
+    container_name: routerlink
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - ./data:/data

@@ -1,0 +1,22 @@
+[project]
+name = "routerlink"
+version = "1.0.0"
+description = "Telekom Speedport Smart 4 line monitor with a web dashboard and CSV logging"
+requires-python = ">=3.12"
+license = "MIT"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+routerlink = ["web/static/*"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
