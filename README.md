@@ -22,7 +22,7 @@ User requirements with acceptance criteria and status: [docs/REQUIREMENTS.md](do
 
 ## Install with Docker
 
-Image: `ghcr.io/markuspabst/wanview` for `linux/amd64` and `linux/arm64`, built by GitHub Actions (`.github/workflows/docker.yml`): `latest` follows `main`, version tags (`v1.2.3`) give `1.2.3` and `1.2`. Current release: `1.4.0`. Up to 1.0.0 the image was `ghcr.io/markuspabst/routerlink`; replace it with `wanview` in `docker run` or `docker-compose.yml` (the data folder stays compatible).
+Image: `ghcr.io/markuspabst/wanview` for `linux/amd64` and `linux/arm64`, built by GitHub Actions (`.github/workflows/docker.yml`): `latest` follows `main`, version tags (`v1.2.3`) give `1.2.3` and `1.2`. Current release: `1.5.0`. Up to 1.0.0 the image was `ghcr.io/markuspabst/routerlink`; replace it with `wanview` in `docker run` or `docker-compose.yml` (the data folder stays compatible).
 
 ### docker run
 
