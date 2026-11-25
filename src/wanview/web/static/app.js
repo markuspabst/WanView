@@ -442,6 +442,8 @@ const TIME_LABEL_DAY_LIMIT_MS = 36 * 3600 * 1000;   // up to this range: times o
 const TIME_LABEL_WEEK_LIMIT_MS = 8 * 24 * 3600 * 1000;   // above: dates only
 const TICK_TARGET = 4;
 const GAP_FACTOR = 3;
+// With less data than the selected range the axis starts at the first value, but spans at least this.
+const MIN_AXIS_SPAN_MS = 10 * 60 * 1000;
 // Titles of collapsed charts, kept across reloads and history refreshes.
 const COLLAPSED_KEY = "wanview.collapsedCharts";
 
@@ -499,7 +501,11 @@ function chart(title, unit, names, points, start, end, maxGapMs,
 
   const values = points.flatMap((p) => p.values).concat(references).filter((v) => v !== null && v !== undefined);
   if (values.length === 0) {
-    box.append(element("p", { class: "muted" }, "No values in this range."));
+    const empty = element("div", { class: "plot" });
+    empty.append(svgElement("svg", { viewBox: `0 0 ${CHART.width} ${CHART.height}`, preserveAspectRatio: "none" }),
+                 element("span", { class: "no-data" }, "No data available"));
+    timeLabels(empty, start, end);
+    box.append(empty);
     return box;
   }
   let low = Math.min(...values), high = Math.max(...values);
@@ -535,15 +541,7 @@ function chart(title, unit, names, points, start, end, maxGapMs,
     svg.append(svgElement("line", { x1: 0, x2: CHART.width, y1: y(value), y2: y(value), stroke: palette[series],
                                     "stroke-dasharray": "6 4", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
   });
-  const shortRange = end - start <= TIME_LABEL_DAY_LIMIT_MS;
-  const longRange = end - start > TIME_LABEL_WEEK_LIMIT_MS;
-  for (const fraction of TIME_LABEL_FRACTIONS) {
-    const t = start + (end - start) * fraction;
-    const text = new Date(t).toLocaleString([], shortRange ? { hour: "2-digit", minute: "2-digit" }
-      : longRange ? { day: "numeric", month: "short" } : { weekday: "short", hour: "2-digit", minute: "2-digit" });
-    const align = fraction === 0 ? "start" : fraction === 1 ? "end" : "middle";
-    plot.append(element("span", { class: `x-label ${align}`, style: `left: ${fraction * 100}%` }, text));
-  }
+  timeLabels(plot, start, end);
   names.forEach((_, series) => {
     let path = "", previous = null;
     for (const point of points) {
@@ -574,6 +572,18 @@ function chart(title, unit, names, points, start, end, maxGapMs,
   return box;
 }
 
+function timeLabels(plot, start, end) {
+  const shortRange = end - start <= TIME_LABEL_DAY_LIMIT_MS;
+  const longRange = end - start > TIME_LABEL_WEEK_LIMIT_MS;
+  for (const fraction of TIME_LABEL_FRACTIONS) {
+    const t = start + (end - start) * fraction;
+    const text = new Date(t).toLocaleString([], shortRange ? { hour: "2-digit", minute: "2-digit" }
+      : longRange ? { day: "numeric", month: "short" } : { weekday: "short", hour: "2-digit", minute: "2-digit" });
+    const align = fraction === 0 ? "start" : fraction === 1 ? "end" : "middle";
+    plot.append(element("span", { class: `x-label ${align}`, style: `left: ${fraction * 100}%` }, text));
+  }
+}
+
 // 5G overflow (average per details poll); red: a bonding leg was down. Each overflow row:
 // [time, 5G down, 5G up, DSL leg up, 5G leg up, DSL limit down, DSL limit up].
 function bondingChart(rows, start, end, maxGapMs) {
@@ -597,7 +607,14 @@ async function refreshHistory() {
   const response = await fetch(`/api/history?range=${historyRange}`);
   if (!response.ok) return;
   const h = await response.json();
-  const start = Date.parse(h.since), end = Date.parse(h.now);
+  const end = Date.parse(h.now);
+  // Less logged than the range (e.g. a new install): all charts start at the first value
+  // instead of showing mostly empty space. Rows are in time order.
+  const firstTimes = [h.status, h.line, h.crc, h.overflow, h.speedtest]
+    .filter((rows) => rows.length).map((rows) => Date.parse(rows[0][0]));
+  const start = firstTimes.length
+    ? Math.max(Date.parse(h.since), Math.min(end - MIN_AXIS_SPAN_MS, ...firstTimes))
+    : Date.parse(h.since);
   const statusGap = (current ? current.settings.statusInterval : 30) * 1000 * GAP_FACTOR;
   const detailsGap = (current ? current.settings.detailsInterval : 300) * 1000 * GAP_FACTOR;
   const mbit = (v) => (v === null ? null : v / BITS_PER_MEGABIT);
