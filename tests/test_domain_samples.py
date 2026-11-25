@@ -2,9 +2,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from routerlink.domain.line import DSLDetails
-from routerlink.domain.quality import Quality, crc_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality
-from routerlink.domain.samples import (
+from wanview.domain.line import DSLDetails
+from wanview.domain.quality import Quality, crc_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality
+from wanview.domain.samples import (
     ErrorRate,
     HostLink,
     LineSample,
@@ -14,10 +14,10 @@ from routerlink.domain.samples import (
     StatusSample,
     link_from_router_ports,
 )
-from routerlink.domain.status import LineStatus
-from routerlink.domain.traffic import BondingStatus, LANCounters
-from routerlink.speedport.engineer_page import EngineerPage
-from routerlink.speedport.varlist import VarList
+from wanview.domain.status import LineStatus
+from wanview.domain.traffic import BondingStatus, LANCounters
+from wanview.speedport.engineer_page import EngineerPage
+from wanview.speedport.varlist import VarList
 
 TIME = datetime.fromtimestamp(1_795_460_000, UTC)
 BONDING = BondingStatus(True, False, 84716, 30121)

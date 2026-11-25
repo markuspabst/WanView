@@ -1,11 +1,11 @@
 import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
 
-from routerlink.speedport.cipher import DEFAULT_KEY_HEX, AuthenticationFailed, SpeedportCipher
-from routerlink.speedport.client import _form_encode
-from routerlink.speedport.engineer_page import EngineerPage, number
-from routerlink.speedport.errors import MalformedResponse
-from routerlink.speedport.varlist import VarList
+from wanview.speedport.cipher import DEFAULT_KEY_HEX, AuthenticationFailed, SpeedportCipher
+from wanview.speedport.client import _form_encode
+from wanview.speedport.engineer_page import EngineerPage, number
+from wanview.speedport.errors import MalformedResponse
+from wanview.speedport.varlist import VarList
 
 # NIST SP 800-38C, Appendix C: the library must match the CCM the web UI's SJCL uses.
 NIST_KEY = "404142434445464748494a4b4c4d4e4f"

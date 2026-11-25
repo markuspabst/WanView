@@ -4,7 +4,7 @@ entries. `varvalue` is a string, or a nested entry list for templates."""
 import json
 from dataclasses import dataclass
 
-from routerlink.speedport.errors import MalformedResponse
+from wanview.speedport.errors import MalformedResponse
 
 # The UI escapes commas inside values (`decodeValue` in `jsonvariables.js`).
 _ESCAPED_COMMA = "&#044;"

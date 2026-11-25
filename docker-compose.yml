@@ -1,7 +1,7 @@
 services:
-  routerlink:
-    image: ghcr.io/markuspabst/routerlink:latest
-    container_name: routerlink
+  wanview:
+    image: ghcr.io/markuspabst/wanview:latest
+    container_name: wanview
     restart: unless-stopped
     ports:
       - "8080:8080"

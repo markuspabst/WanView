@@ -8,14 +8,14 @@ import pytest
 from fakes import FakeRouter, FakeTester
 import httpx
 
-from routerlink.app.data_log import DataLog
-from routerlink.app.monitor import Monitor
-from routerlink.app.store import Choice, Settings, Store
-from routerlink.domain.samples import HostLink, StatusSample
-from routerlink.host_network import InterfaceKind
-from routerlink.speedtest import RateLimited
-from routerlink.domain.status import LineStatus
-from routerlink.speedport.varlist import VarList
+from wanview.app.data_log import DataLog
+from wanview.app.monitor import Monitor
+from wanview.app.store import Choice, Settings, Store
+from wanview.domain.samples import HostLink, StatusSample
+from wanview.host_network import InterfaceKind
+from wanview.speedtest import RateLimited
+from wanview.domain.status import LineStatus
+from wanview.speedport.varlist import VarList
 
 DEFAULTS = Settings(router_url="https://speedport.ip", status_interval=3600, details_interval=3600)
 

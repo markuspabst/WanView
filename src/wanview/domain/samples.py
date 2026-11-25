@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from routerlink.domain.line import DSLDetails, ReceiverStatus
-from routerlink.domain.status import LineStatus
-from routerlink.domain.traffic import RECEIVER_PORT, BondingStatus, LANCounters, bits_per_second
+from wanview.domain.line import DSLDetails, ReceiverStatus
+from wanview.domain.status import LineStatus
+from wanview.domain.traffic import RECEIVER_PORT, BondingStatus, LANCounters, bits_per_second
 
 _SEPARATOR = ","
 _REPLACEMENT = " "

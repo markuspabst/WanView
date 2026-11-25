@@ -24,9 +24,9 @@ from dataclasses import dataclass
 
 import httpx
 
-from routerlink.speedport.cipher import DEFAULT_KEY_HEX, AuthenticationFailed, SpeedportCipher
-from routerlink.speedport.engineer_page import EngineerPage
-from routerlink.speedport.errors import (
+from wanview.speedport.cipher import DEFAULT_KEY_HEX, AuthenticationFailed, SpeedportCipher
+from wanview.speedport.engineer_page import EngineerPage
+from wanview.speedport.errors import (
     HTTPStatusError,
     LoginLocked,
     LoginRejected,
@@ -36,7 +36,7 @@ from routerlink.speedport.errors import (
     SessionExpired,
     SpeedportError,
 )
-from routerlink.speedport.varlist import VarList
+from wanview.speedport.varlist import VarList
 
 DEFAULT_BASE_URL = "https://speedport.ip"
 # Time the web UI waits after a restart (`routerConfig.hardware.rebootTime` in `js/global.js`).
@@ -50,7 +50,7 @@ _SESSION_TIMEOUT_PAGE = "wait0.stm"
 _LOGIN_SUCCESS = "success"
 _HTTP_OK = 200
 _REQUEST_TIMEOUT_SECONDS = 10.0
-_USER_AGENT = "Routerlink"
+_USER_AGENT = "WanView"
 _FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 _HTTOKEN = re.compile(r"_httoken\s*=\s*(\d+)")
 

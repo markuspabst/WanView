@@ -1,5 +1,5 @@
 "use strict";
-// Routerlink dashboard. Router values are untrusted: always inserted as text, never as HTML.
+// WanView dashboard. Router values are untrusted: always inserted as text, never as HTML.
 
 const STATE_INTERVAL_MS = 5000;   // also keeps live LAN traffic running on the server
 const HISTORY_INTERVAL_MS = 30000;
@@ -230,7 +230,7 @@ function renderHeader(state) {
     summary.append(` · ${signal[0]} `, signalBars(s.signalRating, `${signal[0]} ${Math.round(signal[1])} dBm (${s.signalRating})`));
     text += ` · ${signal[0]} ${SIGNAL_BARS[s.signalRating]}/${BAR_COUNT}`;
   }
-  document.title = text ? `Routerlink · ${text}` : "Routerlink";
+  document.title = text ? `WanView · ${text}` : "WanView";
 
   const pause = document.getElementById("pause");
   pause.textContent = state.paused ? "Resume" : "Pause";
@@ -321,7 +321,7 @@ async function refreshState() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     current = await response.json();
   } catch (error) {
-    document.getElementById("notices").replaceChildren(element("p", { class: "error" }, `Routerlink not reachable: ${error.message}`));
+    document.getElementById("notices").replaceChildren(element("p", { class: "error" }, `WanView not reachable: ${error.message}`));
     return;
   }
   renderHeader(current);
@@ -396,7 +396,7 @@ const TIME_LABEL_WEEK_LIMIT_MS = 8 * 24 * 3600 * 1000;   // above: dates only
 const TICK_TARGET = 4;
 const GAP_FACTOR = 3;
 // Titles of collapsed charts, kept across reloads and history refreshes.
-const COLLAPSED_KEY = "routerlink.collapsedCharts";
+const COLLAPSED_KEY = "wanview.collapsedCharts";
 
 function collapsedCharts() {
   try {

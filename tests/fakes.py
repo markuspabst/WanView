@@ -2,9 +2,9 @@
 
 import json
 
-from routerlink.speedport.engineer_page import EngineerPage
-from routerlink.speedport.varlist import VarList
-from routerlink.speedtest import Measurement
+from wanview.speedport.engineer_page import EngineerPage
+from wanview.speedport.varlist import VarList
+from wanview.speedtest import Measurement
 
 
 LAN_STEP_BYTES = 10_000_000

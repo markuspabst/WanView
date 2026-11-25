@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from routerlink.host_network import InterfaceKind, linux_interface_kind, macos_interface_kind
+from wanview.host_network import InterfaceKind, linux_interface_kind, macos_interface_kind
 
 ROUTES = """Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask
 {iface}\t00000000\t014CA8C0\t0003\t0\t0\t0\t00000000

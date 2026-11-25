@@ -3,7 +3,7 @@
     2026-11-23-status.csv   every status poll
     2026-11-23-line.csv     every line-details poll
     2026-11-23-overflow.csv every line-details poll with a 5G receiver
-    2026-11-23-speedtest.csv every speed test (Routerlink only)
+    2026-11-23-speedtest.csv every speed test (WanView only)
 
 Files are not pruned (about 300 KB per day). Not thread-safe: use from the event loop.
 """
@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, TypeVar
 
-from routerlink.domain.samples import LineSample, OverflowSample, SpeedTestSample, StatusSample
+from wanview.domain.samples import LineSample, OverflowSample, SpeedTestSample, StatusSample
 
 _STATUS = "status"
 _LINE = "line"

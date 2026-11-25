@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from routerlink.speedport.engineer_page import EngineerPage, integer, number
+from wanview.speedport.engineer_page import EngineerPage, integer, number
 
 DSL_PAGE = "dsl_hidden_status.stm"
 RECEIVER_PAGE = "hybrid_receiver.stm"

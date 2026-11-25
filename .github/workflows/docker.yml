@@ -1,5 +1,5 @@
 # Tests, then builds the multi-arch image (amd64, arm64) and publishes it to
-# ghcr.io/<owner>/routerlink: `latest` from main, `1.2.3` / `1.2` from tags `v1.2.3`.
+# ghcr.io/<owner>/wanview: `latest` from main, `1.2.3` / `1.2` from tags `v1.2.3`.
 # Pull requests are tested and built, not published.
 name: docker
 
@@ -40,7 +40,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/routerlink
+          images: ghcr.io/${{ github.repository_owner }}/wanview
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}

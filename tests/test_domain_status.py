@@ -1,7 +1,7 @@
 import pytest
 
-from routerlink.domain.status import LineStatus, RouterModel
-from routerlink.speedport.varlist import VarList
+from wanview.domain.status import LineStatus, RouterModel
+from wanview.speedport.varlist import VarList
 
 
 def status(json: str) -> LineStatus:

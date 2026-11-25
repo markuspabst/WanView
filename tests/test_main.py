@@ -1,6 +1,6 @@
 import pytest
 
-from routerlink.__main__ import listen_host
+from wanview.__main__ import listen_host
 
 
 def test_listens_on_all_interfaces_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

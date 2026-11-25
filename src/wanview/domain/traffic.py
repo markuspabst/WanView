@@ -11,7 +11,7 @@ Wi-Fi clients transfer, too high during local transfers between wired devices.
 
 from dataclasses import dataclass
 
-from routerlink.speedport.engineer_page import EngineerPage, integer, number
+from wanview.speedport.engineer_page import EngineerPage, integer, number
 
 LAN_PAGE = "interfaces_hidden_lan.stm"
 BONDING_PAGE = "hybrid_bonding.stm"

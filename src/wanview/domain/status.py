@@ -3,7 +3,7 @@
 import re
 from dataclasses import dataclass
 
-from routerlink.speedport.varlist import VarList
+from wanview.speedport.varlist import VarList
 
 _ENABLED = "1"
 _ONLINE = "online"

@@ -1,4 +1,4 @@
-"""Entry point: `python -m routerlink`. Configuration from environment variables
+"""Entry point: `python -m wanview`. Configuration from environment variables
 (see README and .env.example); `*_FILE` variants read the value from a file,
 e.g. a Docker secret."""
 
@@ -8,11 +8,11 @@ from pathlib import Path
 
 import uvicorn
 
-from routerlink.app.data_log import DataLog
-from routerlink.app.monitor import Monitor
-from routerlink.app.store import SPEEDTEST_OFF, Settings, Store
-from routerlink.speedport.client import DEFAULT_BASE_URL
-from routerlink.web.server import create_app
+from wanview.app.data_log import DataLog
+from wanview.app.monitor import Monitor
+from wanview.app.store import SPEEDTEST_OFF, Settings, Store
+from wanview.speedport.client import DEFAULT_BASE_URL
+from wanview.web.server import create_app
 
 _DEFAULT_DATA_DIR = "/data"
 # All interfaces, as a container needs; 127.0.0.1 limits the dashboard to this machine.

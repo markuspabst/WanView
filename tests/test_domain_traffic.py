@@ -1,6 +1,6 @@
-from routerlink.domain.line import DSLDetails, DSLDirection, ReceiverStatus, Cell
-from routerlink.domain.traffic import BondingStatus, HybridTrafficRate, LANCounters, LANTrafficRate, PortCounters, PortRate
-from routerlink.speedport.engineer_page import EngineerPage
+from wanview.domain.line import DSLDetails, DSLDirection, ReceiverStatus, Cell
+from wanview.domain.traffic import BondingStatus, HybridTrafficRate, LANCounters, LANTrafficRate, PortCounters, PortRate
+from wanview.speedport.engineer_page import EngineerPage
 
 
 def test_dsl_details_parse_hidden_status_page() -> None:

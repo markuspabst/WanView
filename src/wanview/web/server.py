@@ -30,9 +30,9 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from routerlink.app.data_log import DataLog
-from routerlink.app.monitor import Monitor
-from routerlink.app.store import (
+from wanview.app.data_log import DataLog
+from wanview.app.monitor import Monitor
+from wanview.app.store import (
     DETAILS_INTERVAL_RANGE,
     SPEEDTEST_INTERVAL_RANGE,
     SPEEDTEST_OFF,
@@ -40,7 +40,7 @@ from routerlink.app.store import (
     Choice,
     Settings,
 )
-from routerlink.web.state import history, state
+from wanview.web.state import history, state
 
 _STATIC = Path(__file__).parent / "static"
 _ALLOWED_SCHEMES = ("https", "http")
@@ -81,7 +81,7 @@ def create_app(monitor: Monitor, data_log: DataLog, dashboard_password: str | No
         given = credentials.password.encode() if credentials else b""
         if not secrets.compare_digest(given, dashboard_password.encode()):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Login required",
-                                headers={"WWW-Authenticate": 'Basic realm="Routerlink"'})
+                                headers={"WWW-Authenticate": 'Basic realm="WanView"'})
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -89,7 +89,7 @@ def create_app(monitor: Monitor, data_log: DataLog, dashboard_password: str | No
         yield
         await monitor.stop()
 
-    app = FastAPI(title="Routerlink", lifespan=lifespan, dependencies=[Depends(authorize)],
+    app = FastAPI(title="WanView", lifespan=lifespan, dependencies=[Depends(authorize)],
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", _RevalidatedStaticFiles(directory=_STATIC), name="static")
 

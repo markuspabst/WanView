@@ -22,10 +22,10 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from routerlink.app.data_log import DataLog
-from routerlink.app.store import Choice, KnownRouter, Settings, Store
-from routerlink.domain.line import DSL_PAGE, RECEIVER_PAGE, DSLDetails, ReceiverStatus
-from routerlink.domain.samples import (
+from wanview.app.data_log import DataLog
+from wanview.app.store import Choice, KnownRouter, Settings, Store
+from wanview.domain.line import DSL_PAGE, RECEIVER_PAGE, DSLDetails, ReceiverStatus
+from wanview.domain.samples import (
     ErrorRate,
     LineSample,
     NormalSync,
@@ -35,8 +35,8 @@ from routerlink.domain.samples import (
     HostLink,
     link_from_router_ports,
 )
-from routerlink.domain.status import LineStatus, RouterModel
-from routerlink.domain.traffic import (
+from wanview.domain.status import LineStatus, RouterModel
+from wanview.domain.traffic import (
     BONDING_PAGE,
     LAN_PAGE,
     BondingStatus,
@@ -44,10 +44,10 @@ from routerlink.domain.traffic import (
     LANCounters,
     LANTrafficRate,
 )
-from routerlink.speedport.client import REBOOT_SECONDS, SpeedportClient
-from routerlink.speedport.errors import SpeedportError
-from routerlink.host_network import InterfaceKind, default_interface_kind
-from routerlink.speedtest import RateLimited, SpeedTester
+from wanview.speedport.client import REBOOT_SECONDS, SpeedportClient
+from wanview.speedport.errors import SpeedportError
+from wanview.host_network import InterfaceKind, default_interface_kind
+from wanview.speedtest import RateLimited, SpeedTester
 
 log = logging.getLogger(__name__)
 

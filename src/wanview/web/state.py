@@ -3,12 +3,12 @@ times ISO 8601 UTC; ratings ("excellent" … "poor") are computed here."""
 
 from datetime import UTC, datetime, timedelta
 
-from routerlink.app.data_log import DataLog
-from routerlink.app.monitor import Monitor
-from routerlink.domain.line import Cell
-from routerlink.domain.samples import ErrorRate, NormalSync
-from routerlink.domain.quality import Quality, crc_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality, worst
-from routerlink.domain.traffic import HybridTrafficRate
+from wanview.app.data_log import DataLog
+from wanview.app.monitor import Monitor
+from wanview.domain.line import Cell
+from wanview.domain.samples import ErrorRate, NormalSync
+from wanview.domain.quality import Quality, crc_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality, worst
+from wanview.domain.traffic import HybridTrafficRate
 
 _KBIT = 1000
 _ONLINE = "online"

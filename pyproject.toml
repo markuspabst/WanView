@@ -1,5 +1,5 @@
 [project]
-name = "routerlink"
+name = "wanview"
 version = "1.0.0"
 description = "Telekom Speedport Smart 4 line monitor with a web dashboard and CSV logging"
 requires-python = ">=3.12"
@@ -9,7 +9,7 @@ license = "MIT"
 where = ["src"]
 
 [tool.setuptools.package-data]
-routerlink = ["web/static/*"]
+wanview = ["web/static/*"]
 
 [build-system]
 requires = ["setuptools>=69"]

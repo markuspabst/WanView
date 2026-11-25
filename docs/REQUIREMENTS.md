@@ -8,7 +8,7 @@ Verification: *test* = automated test in `tests/` (`pytest`); *manual* = checked
 
 | ID | Requirement | Acceptance | Verification | Status |
 |---|---|---|---|---|
-| UR-01 | Runs continuously in Docker on a NAS, Synology or Linux host, installable from a registry. | `docker compose up -d` with the published image (`ghcr.io/markuspabst/routerlink`, amd64 + arm64) starts the service; data survives container restarts in `/data`. | GitHub Actions: tests passed, image built and published for amd64 and arm64; anonymous pull of the manifest verified. Not yet started on a NAS. | partly |
+| UR-01 | Runs continuously in Docker on a NAS, Synology or Linux host, installable from a registry. | `docker compose up -d` with the published image (`ghcr.io/markuspabst/wanview`, amd64 + arm64) starts the service; data survives container restarts in `/data`. | GitHub Actions: tests passed, image built and published for amd64 and arm64; anonymous pull of the manifest verified. Not yet started on a NAS. | partly |
 | UR-02 | Same functionality as the Linkbar menu bar app. | Status, line details, 5G receiver, bonding, overflow, LAN traffic, ratings and CSV logs as in Linkbar. | test (ported Linkbar tests), manual | met |
 | UR-03 | Every poll is logged constantly. | Status, line details, overflow and speed tests are appended to daily CSV files in the Linkbar format. | test (`test_data_log_*`, CSV round trips); manual: 1,633 Linkbar rows re-serialized byte-identically | met |
 | UR-04 | Stats are shown in a web view. | Dashboard at `http://<host>:8080` with current values and history. | manual | met |

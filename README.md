@@ -1,4 +1,4 @@
-# Routerlink
+# WanView
 
 Line monitor for the Telekom Speedport Smart 4 (DSL + external 5G receiver) as a Docker container for a NAS, Synology or any Linux host. It polls the router continuously, logs every poll to CSV and shows current values and history in a web dashboard.
 
@@ -24,16 +24,16 @@ User requirements with acceptance criteria and status: [docs/REQUIREMENTS.md](do
 
 ## Install with Docker
 
-Image: `ghcr.io/markuspabst/routerlink` for `linux/amd64` and `linux/arm64`, built by GitHub Actions (`.github/workflows/docker.yml`): `latest` follows `main`, version tags (`v1.2.3`) give `1.2.3` and `1.2`.
+Image: `ghcr.io/markuspabst/wanview` for `linux/amd64` and `linux/arm64`, built by GitHub Actions (`.github/workflows/docker.yml`): `latest` follows `main`, version tags (`v1.2.3`) give `1.2.3` and `1.2`.
 
 ### docker run
 
 ```sh
-mkdir -p routerlink/data && sudo chown 1000 routerlink/data   # the container runs as uid 1000
-docker run -d --name routerlink --restart unless-stopped -p 8080:8080 \
-  -v "$PWD/routerlink/data:/data" \
+mkdir -p wanview/data && sudo chown 1000 wanview/data   # the container runs as uid 1000
+docker run -d --name wanview --restart unless-stopped -p 8080:8080 \
+  -v "$PWD/wanview/data:/data" \
   -e ROUTER_PASSWORD='device password' -e DASHBOARD_PASSWORD='dashboard password' \
-  ghcr.io/markuspabst/routerlink:latest
+  ghcr.io/markuspabst/wanview:latest
 ```
 
 Dashboard: `http://<host>:8080`. Both passwords are optional: the router password can be entered in the dashboard, and without a dashboard password the dashboard is open to the network.
@@ -49,9 +49,9 @@ docker compose up -d          # update: docker compose pull && docker compose up
 
 ### Synology (Container Manager)
 
-1. File Station: create `docker/routerlink/data`.
-2. Container Manager → Project → Create: name `routerlink`, path `docker/routerlink`, source "Create docker-compose.yml", paste this repository's `docker-compose.yml`.
-3. Data folder permissions: either give uid 1000 write access (`sudo chown 1000 /volume1/docker/routerlink/data` via SSH), or uncomment `user:` in the compose file with your NAS user's IDs (SSH: `id <user>`, often `1026:100`).
+1. File Station: create `docker/wanview/data`.
+2. Container Manager → Project → Create: name `wanview`, path `docker/wanview`, source "Create docker-compose.yml", paste this repository's `docker-compose.yml`.
+3. Data folder permissions: either give uid 1000 write access (`sudo chown 1000 /volume1/docker/wanview/data` via SSH), or uncomment `user:` in the compose file with your NAS user's IDs (SSH: `id <user>`, often `1026:100`).
 4. Set passwords in the compose file under `environment:` (replace the `${…:-}` values) or in a `.env` file next to it, then build/start the project. Update: Project → Action → Build (pulls the latest image).
 
 If `speedport.ip` does not resolve inside the container, set `ROUTER_URL` to the router's IP address (e.g. `https://192.168.2.1`). For the speed test's wired/Wi-Fi detection, uncomment `network_mode: host`.
@@ -59,15 +59,15 @@ If `speedport.ip` does not resolve inside the container, set `ROUTER_URL` to the
 ### Build the image yourself
 
 ```sh
-docker build -t ghcr.io/markuspabst/routerlink:latest .
-# other architecture: docker buildx build --platform linux/amd64,linux/arm64 -t routerlink .
+docker build -t ghcr.io/markuspabst/wanview:latest .
+# other architecture: docker buildx build --platform linux/amd64,linux/arm64 -t wanview .
 ```
 
 ## Run without Docker
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-DATA_DIR=./data PYTHONPATH=src .venv/bin/python -m routerlink
+DATA_DIR=./data PYTHONPATH=src .venv/bin/python -m wanview
 ```
 
 Tests: `.venv/bin/pip install -r requirements-dev.txt && .venv/bin/pytest`
@@ -104,7 +104,7 @@ The router allows one login at a time. Line details (DSL, receiver, bonding, LAN
 
 ## Speed test
 
-"Run" on the Speed test tab measures latency, download and upload against Cloudflare's speed test endpoints (`speed.cloudflare.com`, plain HTTPS). Cloudflare publishes no terms or limits for third-party or automated use of these endpoints (their own `@cloudflare/speedtest` library uses them by default); users report HTTP 429 after about 10 tests per hour from non-browser clients. Routerlink identifies itself honestly, respects `Retry-After` on 429 (scheduled tests wait), and schedules at most every 30 minutes. Each throughput phase runs 4 parallel streams for 8 s; the line is saturated for about 20 s and a test moves roughly 100–250 MB, partly over 5G. Automatic tests: Settings → "Speed test every (min)", 0 = off (default, or `SPEEDTEST_INTERVAL`), otherwise 30–1440 minutes.
+"Run" on the Speed test tab measures latency, download and upload against Cloudflare's speed test endpoints (`speed.cloudflare.com`, plain HTTPS). Cloudflare publishes no terms or limits for third-party or automated use of these endpoints (their own `@cloudflare/speedtest` library uses them by default); users report HTTP 429 after about 10 tests per hour from non-browser clients. WanView identifies itself honestly, respects `Retry-After` on 429 (scheduled tests wait), and schedules at most every 30 minutes. Each throughput phase runs 4 parallel streams for 8 s; the line is saturated for about 20 s and a test moves roughly 100–250 MB, partly over 5G. Automatic tests: Settings → "Speed test every (min)", 0 = off (default, or `SPEEDTEST_INTERVAL`), otherwise 30–1440 minutes.
 
 With a set-up router and a 5G receiver, the receiver port's byte counters are read before and after each phase, so the result is split into DSL and 5G (other traffic during the test counts too). This holds the router login for the test (about 40 s with the readings). Results: `/data/logs/<date>-speedtest.csv` (`time,latency_ms,down_bps,up_bps,mobile_down_bps,mobile_up_bps`) and a History chart. The result measures the host's own connection: a host on Wi-Fi measures Wi-Fi, not the line. Each result is marked:
 
@@ -155,5 +155,5 @@ The normal sync rate is the median of the last 7 days of logged status polls (pe
 - The DSL estimate is too low while Wi-Fi clients transfer and too high during local transfers between wired devices; no Wi-Fi or WAN byte counters are available.
 - The router occasionally reports DSL sync 0 while online, the DSL page 0.0 dB for missing upstream levels, and the receiver RSRP/RSRQ 0.0 without a measurement; all are treated as no value (also in older log rows shown in the history).
 - Router restart: if the router restarts before answering, a failure is shown although it restarts.
-- The router's e-mail notification on security events (which may include logins) is not changed by Routerlink: settings data pages (`EMailNotify.json`, `SystemMessages.json`, `LAN.json`, `Overview.json`) return empty lists to this client although the router reports it as logged in (`loginstate=1`). Tried without success: loading the overview page first, browser headers, POST reads, `challengev`/`derivedk` cookies. Switch the notification off in the router: Einstellungen → E-Mail-Benachrichtigung → "Ein sicherheits-relevantes Ereignis ist aufgetreten".
+- The router's e-mail notification on security events (which may include logins) is not changed by WanView: settings data pages (`EMailNotify.json`, `SystemMessages.json`, `LAN.json`, `Overview.json`) return empty lists to this client although the router reports it as logged in (`loginstate=1`). Tried without success: loading the overview page first, browser headers, POST reads, `challengev`/`derivedk` cookies. Switch the notification off in the router: Einstellungen → E-Mail-Benachrichtigung → "Ein sicherheits-relevantes Ereignis ist aufgetreten".
 - The router takes about 5–6 s to answer `Status.json` (about 130 KB with the device list), so identification and every status poll take that long; measured with curl as well.

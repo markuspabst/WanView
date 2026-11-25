@@ -11,7 +11,7 @@ in `js/jquery-addons.js`).
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
 
-from routerlink.speedport.errors import MalformedResponse
+from wanview.speedport.errors import MalformedResponse
 
 DEFAULT_KEY_HEX = "cdc0cac1280b516e674f0057e4929bca84447cca8425007e33a88a5cf598a190"
 _NONCE_LENGTH = 8

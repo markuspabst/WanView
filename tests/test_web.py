@@ -4,15 +4,15 @@ from pathlib import Path
 from fakes import FakeRouter, FakeTester
 from fastapi.testclient import TestClient
 
-from routerlink.app.data_log import DataLog
-from routerlink.app.monitor import Monitor
-from routerlink.app.store import Settings, Store
-from routerlink.domain.line import DSLDetails
-from routerlink.domain.samples import LineSample, OverflowSample, StatusSample
-from routerlink.domain.status import LineStatus
-from routerlink.speedport.engineer_page import EngineerPage
-from routerlink.speedport.varlist import VarList
-from routerlink.web.server import create_app
+from wanview.app.data_log import DataLog
+from wanview.app.monitor import Monitor
+from wanview.app.store import Settings, Store
+from wanview.domain.line import DSLDetails
+from wanview.domain.samples import LineSample, OverflowSample, StatusSample
+from wanview.domain.status import LineStatus
+from wanview.speedport.engineer_page import EngineerPage
+from wanview.speedport.varlist import VarList
+from wanview.web.server import create_app
 
 DEFAULTS = Settings(router_url="https://speedport.ip", status_interval=3600, details_interval=3600)
 
