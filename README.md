@@ -84,6 +84,7 @@ Tests: `.venv/bin/pip install -r requirements-dev.txt && .venv/bin/pytest`
 | `SPEEDTEST_INTERVAL` | `0` | automatic speed test every N minutes (30–1440); 0 = off |
 | `DATA_DIR` | `/data` | logs, settings, routers, passwords |
 | `PORT` | `8080` | dashboard port |
+| `HOST` | `0.0.0.0` | listening address; `127.0.0.1` makes the dashboard reachable from this machine only |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
 ## Routers and passwords

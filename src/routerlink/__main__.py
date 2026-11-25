@@ -15,6 +15,8 @@ from routerlink.speedport.client import DEFAULT_BASE_URL
 from routerlink.web.server import create_app
 
 _DEFAULT_DATA_DIR = "/data"
+# All interfaces, as a container needs; 127.0.0.1 limits the dashboard to this machine.
+_DEFAULT_HOST = "0.0.0.0"
 _DEFAULT_PORT = 8080
 _DEFAULT_STATUS_INTERVAL = 30
 _DEFAULT_DETAILS_INTERVAL = 300
@@ -45,7 +47,12 @@ def main() -> None:
     data_log = DataLog(data_dir / "logs")
     monitor = Monitor(Store(data_dir, defaults), data_log, initial_password=_secret("ROUTER_PASSWORD"))
     app = create_app(monitor, data_log, dashboard_password=_secret("DASHBOARD_PASSWORD"))
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", _DEFAULT_PORT)), log_config=None)
+    uvicorn.run(app, host=listen_host(), port=int(os.environ.get("PORT", _DEFAULT_PORT)), log_config=None)
+
+
+def listen_host() -> str:
+    """Address the dashboard listens on (`HOST`)."""
+    return os.environ.get("HOST") or _DEFAULT_HOST
 
 
 if __name__ == "__main__":
