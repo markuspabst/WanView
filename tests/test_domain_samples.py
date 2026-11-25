@@ -23,7 +23,7 @@ TIME = datetime.fromtimestamp(1_795_460_000, UTC)
 BONDING = BondingStatus(True, False, 84716, 30121)
 
 
-def test_status_sample_matches_linkbar_csv() -> None:
+def test_status_sample_csv_format() -> None:
     status = LineStatus.from_vars(VarList.from_json("""
     [{"varid":"onlinestatus","varvalue":"online"},{"varid":"dsl_downstream","varvalue":"90000000"},
      {"varid":"ex5g_signal_5g","varvalue":"-102.0"},{"varid":"ex5g_freq_5g","varvalue":"NR2100"}]
@@ -53,7 +53,7 @@ def counters(rx: int, tx: int) -> LANCounters:
     return LANCounters.from_page(EngineerPage(f"var max_interface = 1;\ninte_face_rx[0][1] = {rx};\ninte_face_tx[0][1] = {tx};"))
 
 
-def test_first_overflow_sample_matches_linkbar_csv() -> None:
+def test_first_overflow_sample_csv_format() -> None:
     sample = OverflowSample.measure(TIME, BONDING, counters(473_000_000_000, 27_000_000_000), None)
     assert sample.interval_seconds is None
     assert sample.mobile_down_bps is None

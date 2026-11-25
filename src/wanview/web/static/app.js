@@ -187,7 +187,7 @@ function renderTraffic(state) {
 
 // Header, notices, setup, settings
 
-// Filled bars per rating, as in Linkbar's menu bar.
+// Filled bars per rating.
 const SIGNAL_BARS = { poor: 1, fair: 2, good: 3, excellent: 4 };
 const BAR_COUNT = 4;
 

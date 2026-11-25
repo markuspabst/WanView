@@ -1,4 +1,4 @@
-"""Logged polls as CSV rows, compatible with Linkbar's logs (same columns and formats).
+"""Logged polls as CSV rows. Columns and formats are fixed: existing logs must stay readable.
 Times are ISO 8601 UTC with seconds, e.g. `2026-11-23T18:53:20Z`."""
 
 import statistics
@@ -351,7 +351,7 @@ class EventKind(StrEnum):
 
 @dataclass(frozen=True)
 class EventSample:
-    """A changed value (WanView only; Linkbar has no such log). The first value seen
+    """A changed value. The first value seen
     is logged too, so every later change has its predecessor in the log."""
 
     time: datetime
