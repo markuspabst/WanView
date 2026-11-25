@@ -60,7 +60,7 @@ Container Manager → Project → Create:
 ```yaml
 services:
   wanview:
-    image: ghcr.io/markuspabst/wanview:1.3
+    image: ghcr.io/markuspabst/wanview:1.4
     container_name: wanview
     restart: unless-stopped
     ports:
@@ -79,7 +79,7 @@ services:
 
 Next → skip the Web Station portal settings → Next → Done. Container Manager pulls the image and starts the container.
 
-`:1.3` receives fixes within version 1.3; `:latest` follows every change. Passwords do not belong in this file: both are entered in the dashboard.
+`:1.4` receives fixes within version 1.4; `:latest` follows every change. Passwords do not belong in this file: both are entered in the dashboard.
 
 ## 5. First start
 
@@ -91,7 +91,7 @@ The router's address can also be changed later in the dashboard: Settings → Ro
 
 ## Updating
 
-Project → `wanview` → Action → **Build**: pulls the current image of the configured tag and restarts the container. For a new minor version (e.g. 1.4), change the tag in the project's YAML first (Project → `wanview`, edit the compose file there). The data folder is kept.
+Project → `wanview` → Action → **Build**: pulls the current image of the configured tag and restarts the container. For a new minor version (e.g. 1.5), change the tag in the project's YAML first (Project → `wanview`, edit the compose file there). The data folder is kept.
 
 ## Optional settings
 
