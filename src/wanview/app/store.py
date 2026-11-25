@@ -1,17 +1,21 @@
-"""Persistent state in the data volume: settings, known routers, router passwords.
+"""Persistent state in the data volume. Everything about a router is kept per serial number:
 
-    settings.json   router address and poll intervals (UI changes override env defaults)
+    settings.json   router address; default intervals for routers without own settings
     routers.json    routers the user set up or ignored, by serial number
     secrets.json    device passwords by serial number (file mode 600)
     dashboard.json  dashboard access chosen on first open (file mode 600)
+    routers/<serial>/settings.json  this router's poll and speed test intervals
+    routers/<serial>/logs/          this router's CSV logs (see data_log)
 
 A device password is only valid for one router, so it is stored per serial number
 and only ever sent to the router reporting that serial number.
 """
 
+import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -21,6 +25,16 @@ log = logging.getLogger(__name__)
 
 _SECRET_FILE_MODE = 0o600
 _ACCESS_FILE = "dashboard.json"
+_SETTINGS_FILE = "settings.json"
+_ROUTERS_FOLDER = "routers"
+# Logs from before per-router storage; moved to the first router identified.
+_LEGACY_LOGS_FOLDER = "logs"
+_LOGS_FOLDER = "logs"
+# The serial number comes from the router: only plain names become folder names.
+_PLAIN_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_HASHED_NAME_LENGTH = 16
+# Settings that belong to a router; the address is needed to find one, so it is global.
+_ROUTER_SETTINGS = ("status_interval", "details_interval", "speedtest_interval")
 
 
 class Choice(StrEnum):
@@ -70,13 +84,56 @@ class Store:
 
     # Settings
 
-    def settings(self) -> Settings:
-        stored = self._read_json("settings.json", {})
+    def settings(self, serial_number: str | None = None) -> Settings:
+        """Global settings, with the router's own intervals if it has any."""
+        stored = self._read_json(_SETTINGS_FILE, {})
+        if serial_number is not None:
+            stored |= self._read_json(self._router_settings_path(serial_number), {})
         return replace(self._defaults, **{key: value for key, value in stored.items()
                                           if key in Settings.__dataclass_fields__})
 
-    def save_settings(self, settings: Settings) -> None:
-        self._write_json("settings.json", asdict(settings))
+    def save_settings(self, settings: Settings, serial_number: str | None = None) -> None:
+        """The intervals go to the router's own settings when a router is given."""
+        values = asdict(settings)
+        if serial_number is None:
+            self._write_json(_SETTINGS_FILE, values)
+            return
+        stored = self._read_json(_SETTINGS_FILE, {})
+        stored["router_url"] = settings.router_url
+        self._write_json(_SETTINGS_FILE, stored)
+        self._write_json(self._router_settings_path(serial_number), {key: values[key] for key in _ROUTER_SETTINGS})
+
+    # Per-router folders
+
+    def router_folder(self, serial_number: str) -> Path:
+        name = serial_number if _PLAIN_NAME.fullmatch(serial_number) else (
+            "sn-" + hashlib.sha256(serial_number.encode()).hexdigest()[:_HASHED_NAME_LENGTH])
+        folder = self._folder / _ROUTERS_FOLDER / name
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def router_logs_folder(self, serial_number: str) -> Path:
+        return self.router_folder(serial_number) / _LOGS_FOLDER
+
+    def adopt_legacy_logs(self, serial_number: str) -> int:
+        """Moves logs from before per-router storage to this router; returns the number of files.
+        A file the router already has is kept in the old folder."""
+        legacy = self._folder / _LEGACY_LOGS_FOLDER
+        if not legacy.is_dir():
+            return 0
+        target = self.router_logs_folder(serial_number)
+        target.mkdir(parents=True, exist_ok=True)
+        moved = 0
+        for path in sorted(legacy.glob("*.csv")):
+            if not (target / path.name).exists():
+                path.rename(target / path.name)
+                moved += 1
+        if not any(legacy.iterdir()):
+            legacy.rmdir()
+        return moved
+
+    def _router_settings_path(self, serial_number: str) -> str:
+        return str((self.router_folder(serial_number) / _SETTINGS_FILE).relative_to(self._folder))
 
     # Known routers
 

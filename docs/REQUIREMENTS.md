@@ -23,6 +23,7 @@ Verification: *test* = automated test in `tests/` (`pytest`); *manual* = checked
 | UR-11 | A newly detected router offers a choice: set up or ignore. | Unknown router: prompt with "Set up" (password optional) and "Ignore"; until then only status values without login. | test (`test_unknown_router_gets_setup_prompt_and_no_login`, `test_saving_password_sets_up_router_and_logs_in`), manual | met |
 | UR-12 | Set-up and ignored routers are listed in the settings. | Settings show both lists; each router can be switched or removed (removing deletes its password). | test (`test_ignored_router_is_not_monitored`), manual | met |
 | UR-13 | Known routers are stored persistently. | Lists and passwords survive restarts (`routers.json`, `secrets.json` with mode 600). | test (`test_secrets_file_is_private`), manual restart | met |
+| UR-14 | All stored data is connected to the router it belongs to. | Logs, interval and speed test settings per serial number (`routers/<serial>/`); history shows only the connected router; a router swapped at the same address is identified again before any login; older logs move to the first router identified. | test (`test_each_router_has_its_own_logs_and_settings`, `test_swapped_router_never_gets_the_old_password`, `test_logs_from_before_per_router_storage_move_to_the_first_router`, `test_unsafe_serial_cannot_escape_the_data_folder`) | met |
 
 ## Router control
 

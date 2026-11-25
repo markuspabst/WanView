@@ -9,6 +9,8 @@
 - LAN traffic is polled every `TRAFFIC_INTERVAL` only while a dashboard is open
   (it calls `keep_traffic_alive`); the session is held for that time.
 - While paused or while the router restarts, nothing is polled.
+- Logs and interval settings belong to the identified router (its serial number); a
+  router swapped at the same address is identified again before any login.
 
 Thread-safety: use from one asyncio event loop only.
 """
@@ -94,7 +96,7 @@ class Readings:
 
 
 class Monitor:
-    def __init__(self, store: Store, data_log: DataLog, initial_password: str | None,
+    def __init__(self, store: Store, initial_password: str | None,
                  client_factory: Callable[[str, str | None], SpeedportClient] = SpeedportClient,
                  speed_tester: SpeedTester | None = None,
                  host_interface_kind: Callable[[], InterfaceKind | None] = default_interface_kind) -> None:
@@ -104,7 +106,8 @@ class Monitor:
         self._host_interface_kind = host_interface_kind
         self._speed_tester = speed_tester or SpeedTester()
         self._store = store
-        self._log = data_log
+        # Logs of the identified router; nothing is logged before identification.
+        self.data_log: DataLog | None = None
         self._initial_password = initial_password
         self.settings: Settings = store.settings()
         self.routers: list[KnownRouter] = store.routers()
@@ -115,11 +118,10 @@ class Monitor:
         self.router_back_time: datetime | None = None
         self.normal_sync = NormalSync(None, None)
         self._normal_sync_due = 0.0
-        logged_tests = data_log.speedtest_samples(datetime.now(UTC) - _SPEEDTEST_HISTORY)
-        self.last_speedtest: SpeedTestSample | None = logged_tests[-1] if logged_tests else None
+        self.last_speedtest: SpeedTestSample | None = None
         self.speedtest_error: str | None = None
         # Scheduled tests count from the last attempt, so failures are not retried every minute.
-        self._last_speedtest_attempt: datetime | None = self.last_speedtest.time if self.last_speedtest else None
+        self._last_speedtest_attempt: datetime | None = None
         self._speedtest_blocked_until: datetime | None = None
         self._speedtest_task: asyncio.Task[None] | None = None
         self._schedule_task: asyncio.Task[None] | None = None
@@ -129,11 +131,8 @@ class Monitor:
         self._traffic_requested_at = 0.0
         self._last_counters: tuple[LANCounters, float] | None = None
         self._last_line: LineSample | None = None
-        # The log may stem from another router after the address or router changed.
-        self._logged_reference_usable = True
-        # Last value per event kind, so only changes are logged, also across restarts.
-        self._event_values: dict[EventKind, str] = {
-            event.kind: event.value for event in data_log.event_samples(datetime.now(UTC) - _EVENT_MEMORY)}
+        # Last value per event kind of the identified router, so only changes are logged.
+        self._event_values: dict[EventKind, str] = {}
 
     # Lifecycle
 
@@ -218,14 +217,12 @@ class Monitor:
         self._restart()
 
     def update_settings(self, settings: Settings) -> None:
+        """The intervals belong to the identified router; the address is global."""
+        self._store.save_settings(settings, self.serial)
         if settings.router_url != self.settings.router_url:
-            # Unknown until identified at the new address; counters of another router are no reference.
-            self.serial = None
-            self.readings = Readings()
-            self._last_line = None
-            self._logged_reference_usable = False
+            # Unknown until identified at the new address.
+            self._forget_router()
         self.settings = settings
-        self._store.save_settings(settings)
         self._restart()
 
     def _adopt_initial_password(self) -> None:
@@ -298,8 +295,9 @@ class Monitor:
         return self._speedtest_task is not None
 
     def start_speedtest(self) -> bool:
-        """False if a test is running, monitoring is paused or the router restarts."""
-        if self.speedtest_running or self.paused or self.router_back_time is not None:
+        """False if a test is running, monitoring is paused, the router restarts or no router
+        is identified (results are stored with the router)."""
+        if self.speedtest_running or self.paused or self.router_back_time is not None or self.data_log is None:
             return False
         log.info("Speed test started")
         self._last_speedtest_attempt = datetime.now(UTC)
@@ -363,7 +361,8 @@ class Monitor:
                                      measurement.up_bps, mobile_bps(down_rate, "down"), mobile_bps(up_rate, "up"), link)
             self.last_speedtest = sample
             self.speedtest_error = None
-            self._log.append_speedtest(sample)
+            if self.data_log is not None:
+                self.data_log.append_speedtest(sample)
             log.info("Speed test: %.0f / %.0f Mbit/s, %.0f ms, host %s", sample.down_bps / _BITS_PER_MEGABIT,
                      sample.up_bps / _BITS_PER_MEGABIT, sample.latency_ms, link.value if link else "unknown")
         except RateLimited as error:
@@ -484,20 +483,52 @@ class Monitor:
             log.warning("Router reports no serial number")
             self._new_client()
             return
-        if self.serial is not None and self.serial != serial:
-            # Counters of another router are no reference.
-            self.readings.overflow = None
-            self._last_line = None
-            self._logged_reference_usable = False
-        self.serial = serial
+        if self.serial != serial or self.data_log is None:
+            self._open_router_data(serial)
         self._adopt_initial_password()
         self._new_client()
 
+    def _open_router_data(self, serial: str) -> None:
+        """Switches logs, settings and everything derived from the log to this router."""
+        moved = self._store.adopt_legacy_logs(serial)
+        if moved:
+            log.info("Moved %d log files from before per-router storage to router %s", moved, serial[-4:])
+        self.serial = serial
+        self.data_log = DataLog(self._store.router_logs_folder(serial))
+        self.settings = replace(self._store.settings(serial), router_url=self.settings.router_url)
+        self.readings.overflow = None
+        self._last_line = None
+        self.normal_sync = NormalSync(None, None)
+        self._normal_sync_due = 0.0
+        now = datetime.now(UTC)
+        logged_tests = self.data_log.speedtest_samples(now - _SPEEDTEST_HISTORY)
+        self.last_speedtest = logged_tests[-1] if logged_tests else None
+        self._last_speedtest_attempt = self.last_speedtest.time if self.last_speedtest else None
+        self._event_values = {event.kind: event.value for event in self.data_log.event_samples(now - _EVENT_MEMORY)}
+
+    def _forget_router(self) -> None:
+        """No router is known until the next identification; nothing is logged or sent meanwhile."""
+        self._stop_traffic()
+        self.model = None
+        self.serial = None
+        self.data_log = None
+        self.readings = Readings()
+        self._last_line = None
+        self.last_speedtest = None
+
     async def _refresh_status(self) -> None:
         try:
-            self._apply_status(LineStatus.from_vars(await self._client.fetch_public(_STATUS_SOURCE)))
+            status = LineStatus.from_vars(await self._client.fetch_public(_STATUS_SOURCE))
         except _NETWORK_ERRORS as error:
             self._status_failed("Status poll failed", error)
+            return
+        if status.serial_number != self.serial:
+            # Another router at this address: its password and logs are not this one's.
+            log.warning("Router at %s changed; identifying it again", self.settings.router_url)
+            self._forget_router()
+            self._new_client()
+            return
+        self._apply_status(status)
 
     def _status_failed(self, action: str, error: Exception) -> None:
         """Warns once per distinct problem; the same failure repeats every status interval."""
@@ -511,20 +542,24 @@ class Monitor:
         self.readings.status = status
         self.readings.status_time = now
         self.readings.status_error = None
-        self._log.append_status(StatusSample.from_status(now, status))
+        if self.data_log is None:
+            return
+        self.data_log.append_status(StatusSample.from_status(now, status))
         self._log_changes(now, status_events(status))
 
     def _log_changes(self, now: datetime, values: dict[EventKind, str | None]) -> None:
+        if self.data_log is None:
+            return
         for kind, value in values.items():
             if not value or self._event_values.get(kind) == value:
                 continue
             log.info("%s: %s", kind.value, value)
-            self._log.append_event(EventSample(now, kind, value))
+            self.data_log.append_event(EventSample(now, kind, value))
             self._event_values[kind] = value
 
     def _refresh_normal_sync(self) -> None:
         since = datetime.now(UTC) - _NORMAL_SYNC_WINDOW
-        self.normal_sync = NormalSync.from_samples(self._log.status_samples(since))
+        self.normal_sync = NormalSync.from_samples(self.data_log.status_samples(since) if self.data_log else [])
         self._normal_sync_due = time.monotonic() + _NORMAL_SYNC_REFRESH_SECONDS
 
     async def _refresh_details(self) -> None:
@@ -543,7 +578,8 @@ class Monitor:
             self.readings.dsl, self.readings.receiver = dsl, receiver
             self.readings.details_time = now
             self.readings.details_error = None
-            self._log.append_line(sample)
+            if self.data_log is not None:
+                self.data_log.append_line(sample)
             self._log_changes(now, details_events(dsl, receiver))
             if has_receiver:
                 await self._refresh_overflow(now)
@@ -562,7 +598,8 @@ class Monitor:
         sample = OverflowSample.measure(now, bonding, counters, self._overflow_reference(now))
         self.readings.bonding = bonding
         self.readings.overflow = sample
-        self._log.append_overflow(sample)
+        if self.data_log is not None:
+            self.data_log.append_overflow(sample)
 
     def _oldest_reference(self, now: datetime) -> datetime:
         return now - timedelta(seconds=self.settings.details_interval * _REFERENCE_INTERVALS)
@@ -571,16 +608,16 @@ class Monitor:
         """Previous sample from memory, else (after a restart) from the log of the same router."""
         oldest = self._oldest_reference(now)
         candidate = self.readings.overflow
-        if candidate is None and self._logged_reference_usable:
-            logged = self._log.overflow_samples(oldest)
+        if candidate is None and self.data_log is not None:
+            logged = self.data_log.overflow_samples(oldest)
             candidate = logged[-1] if logged else None
         return candidate if candidate is not None and oldest <= candidate.time < now else None
 
     def _line_reference(self, now: datetime) -> LineSample | None:
         oldest = self._oldest_reference(now)
         candidate = self._last_line
-        if candidate is None and self._logged_reference_usable:
-            logged = self._log.line_samples(oldest)
+        if candidate is None and self.data_log is not None:
+            logged = self.data_log.line_samples(oldest)
             candidate = logged[-1] if logged else None
         return candidate if candidate is not None and oldest <= candidate.time < now else None
 

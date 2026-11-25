@@ -21,10 +21,14 @@ DEFAULTS = Settings(router_url="https://speedport.ip", status_interval=3600, det
 
 
 def client(tmp_path: Path, router: FakeRouter) -> TestClient:
-    data_log = DataLog(tmp_path / "logs")
     store = Store(tmp_path, DEFAULTS)
-    monitor = Monitor(store, data_log, None, client_factory=router.client, speed_tester=FakeTester())
-    return TestClient(create_app(monitor, data_log, DashboardAccess(store)))
+    monitor = Monitor(store, None, client_factory=router.client, speed_tester=FakeTester())
+    return TestClient(create_app(monitor, DashboardAccess(store)))
+
+
+def router_log(tmp_path: Path) -> DataLog:
+    """Logs of the fake router (serial SN-A)."""
+    return DataLog(tmp_path / "routers" / "SN-A" / "logs")
 
 
 def test_saving_password_sets_up_router_and_reads_details(tmp_path: Path) -> None:
@@ -100,7 +104,7 @@ def test_dashboard_password_must_not_be_empty(tmp_path: Path) -> None:
 
 
 def test_history_includes_all_logged_values(tmp_path: Path) -> None:
-    data_log = DataLog(tmp_path / "logs")
+    data_log = router_log(tmp_path)
     start = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
     for minutes, band, fec in ((0, "n78", 1000), (30, "n28", 1600)):
         time = start + timedelta(minutes=minutes)
@@ -144,7 +148,7 @@ def test_speed_test_endpoint_and_interval_validation(tmp_path: Path) -> None:
 
 
 def test_history_includes_bonding_state(tmp_path: Path) -> None:
-    DataLog(tmp_path / "logs").append_overflow(OverflowSample(
+    router_log(tmp_path).append_overflow(OverflowSample(
         datetime.now(UTC) - timedelta(minutes=5), 300.0, True, False, 84716, 30121, 1, 1, 2_000_000, 100_000))
     with client(tmp_path, FakeRouter()) as api:
         row = api.get("/api/history?range=day").json()["overflow"][0]
@@ -152,7 +156,7 @@ def test_history_includes_bonding_state(tmp_path: Path) -> None:
 
 
 def test_history_has_outages_line_details_and_crc_rate(tmp_path: Path) -> None:
-    data_log = DataLog(tmp_path / "logs")
+    data_log = router_log(tmp_path)
     start = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
     for minutes, crc, online in ((0, 100, "online"), (30, 110, "offline")):
         time = start + timedelta(minutes=minutes)

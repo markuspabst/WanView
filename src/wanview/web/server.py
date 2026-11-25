@@ -31,7 +31,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from wanview.app.access import DashboardAccess
-from wanview.app.data_log import DataLog
 from wanview.app.monitor import Monitor
 from wanview.app.store import (
     DETAILS_INTERVAL_RANGE,
@@ -78,7 +77,7 @@ class SettingsBody(BaseModel):
     """Minutes; 0 = off."""
 
 
-def create_app(monitor: Monitor, data_log: DataLog, access: DashboardAccess) -> FastAPI:
+def create_app(monitor: Monitor, access: DashboardAccess) -> FastAPI:
     basic = HTTPBasic(auto_error=False)
 
     def authorize(credentials: Annotated[HTTPBasicCredentials | None, Depends(basic)]) -> None:
@@ -108,7 +107,7 @@ def create_app(monitor: Monitor, data_log: DataLog, access: DashboardAccess) -> 
 
     @app.get("/api/history")
     async def get_history(range_name: Annotated[str, Query(alias="range", pattern="^(day|week|month)$")] = "day") -> dict:
-        return history(data_log, range_name, monitor.normal_sync)
+        return history(monitor.data_log, range_name, monitor.normal_sync)
 
     @app.post("/api/pause", status_code=status.HTTP_204_NO_CONTENT)
     async def pause() -> None:
@@ -121,7 +120,7 @@ def create_app(monitor: Monitor, data_log: DataLog, access: DashboardAccess) -> 
     @app.post("/api/speedtest", status_code=status.HTTP_202_ACCEPTED)
     async def start_speedtest() -> None:
         if not monitor.start_speedtest():
-            raise HTTPException(status.HTTP_409_CONFLICT, "A speed test is running, or monitoring is paused.")
+            raise HTTPException(status.HTTP_409_CONFLICT, "A speed test is running, monitoring is paused, or no router is identified yet.")
 
     @app.post("/api/restart-router", status_code=status.HTTP_204_NO_CONTENT)
     async def restart_router() -> None:

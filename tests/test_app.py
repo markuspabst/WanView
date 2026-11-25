@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 import os
 import socket
 import stat
@@ -21,6 +22,10 @@ from wanview.speedport.varlist import VarList
 DEFAULTS = Settings(router_url="https://speedport.ip", status_interval=3600, details_interval=3600)
 
 
+def router_log(tmp_path: Path, serial: str = "SN-A") -> DataLog:
+    return DataLog(tmp_path / "routers" / serial / "logs")
+
+
 async def settle() -> None:
     for _ in range(10):
         await asyncio.sleep(0)
@@ -30,7 +35,7 @@ async def started(tmp_path: Path, router: FakeRouter, initial_password: str | No
                   store: Store | None = None, tester: FakeTester | None = None,
                   host_kind: InterfaceKind | None = None) -> Monitor:
     store = store or Store(tmp_path, DEFAULTS)
-    monitor = Monitor(store, DataLog(tmp_path / "logs"), initial_password, client_factory=router.client,
+    monitor = Monitor(store, initial_password, client_factory=router.client,
                       speed_tester=tester or FakeTester(), host_interface_kind=lambda: host_kind)
     monitor.start()
     await settle()
@@ -76,7 +81,7 @@ async def test_ignored_router_is_not_monitored(tmp_path: Path) -> None:
     await settle()
     assert monitor.is_ignored
     assert monitor.readings.status is None
-    assert DataLog(tmp_path / "logs").status_samples(datetime.now(UTC) - timedelta(minutes=1)) != []  # before ignoring
+    assert router_log(tmp_path).status_samples(datetime.now(UTC) - timedelta(minutes=1)) != []  # before ignoring
     await monitor.stop()
 
 
@@ -136,7 +141,7 @@ async def test_changed_values_are_logged_as_events_once(tmp_path: Path) -> None:
     await monitor._refresh_details()
     await monitor.stop()
 
-    events = [(e.kind, e.value) for e in DataLog(tmp_path / "logs").event_samples(datetime.now(UTC) - timedelta(hours=1))]
+    events = [(e.kind, e.value) for e in router_log(tmp_path).event_samples(datetime.now(UTC) - timedelta(hours=1))]
     assert events == [
         (EventKind.ONLINE_SINCE, "2026-11-24 10:00:00"),
         (EventKind.DSL_MODE, "VDSL2 Annex B"),
@@ -151,8 +156,62 @@ async def test_events_are_not_repeated_after_restart(tmp_path: Path) -> None:
     await monitor.stop()
     monitor = await started(tmp_path, FakeRouter(), store=Store(tmp_path, DEFAULTS))
     await monitor.stop()
-    events = DataLog(tmp_path / "logs").event_samples(datetime.now(UTC) - timedelta(hours=1))
+    events = router_log(tmp_path).event_samples(datetime.now(UTC) - timedelta(hours=1))
     assert len(events) == 3
+
+
+async def test_each_router_has_its_own_logs_and_settings(tmp_path: Path) -> None:
+    router = FakeRouter()
+    monitor = await started(tmp_path, router, initial_password="secret")
+    monitor.update_settings(replace(monitor.settings, status_interval=60, speedtest_interval=120))
+    await settle()
+
+    router.serial = "SN-B"
+    await monitor._refresh_status()        # the router at this address was swapped
+    assert monitor.serial is None and not monitor.has_password
+    await monitor._identify()
+    await monitor.stop()
+
+    assert monitor.serial == "SN-B"
+    assert monitor.settings.status_interval == DEFAULTS.status_interval      # SN-A's settings stay with SN-A
+    assert Store(tmp_path, DEFAULTS).settings("SN-A").speedtest_interval == 120
+    since = datetime.now(UTC) - timedelta(hours=1)
+    assert router_log(tmp_path, "SN-A").status_samples(since) != []
+    assert len(router_log(tmp_path, "SN-B").status_samples(since)) == 1
+    # The new router's events start fresh instead of continuing SN-A's values.
+    assert [e.kind for e in router_log(tmp_path, "SN-B").event_samples(since)] == [EventKind.ONLINE_SINCE]
+
+
+async def test_swapped_router_never_gets_the_old_password(tmp_path: Path) -> None:
+    router = FakeRouter()
+    monitor = await started(tmp_path, router, initial_password="secret")
+    router.serial = "SN-B"
+    router.engineer_reads.clear()
+    await monitor._refresh_status()
+    await monitor._refresh_details()
+    await monitor.stop()
+    assert all(password is None for password, _ in router.engineer_reads)
+
+
+async def test_logs_from_before_per_router_storage_move_to_the_first_router(tmp_path: Path) -> None:
+    status = LineStatus.from_vars(VarList.from_json('[{"varid":"onlinestatus","varvalue":"online"}]'))
+    old = datetime.now(UTC).replace(microsecond=0) - timedelta(days=2)
+    DataLog(tmp_path / "logs").append_status(StatusSample.from_status(old, status))
+    monitor = await started(tmp_path, FakeRouter())
+    await monitor.stop()
+    assert router_log(tmp_path).status_samples(old)[0].time == old
+    assert not (tmp_path / "logs").exists()
+
+
+def test_unsafe_serial_cannot_escape_the_data_folder(tmp_path: Path) -> None:
+    folder = Store(tmp_path, DEFAULTS).router_folder("../../etc")
+    assert folder.parent == tmp_path / "routers"
+
+
+async def test_speed_test_needs_an_identified_router(tmp_path: Path) -> None:
+    monitor = await started(tmp_path, FakeRouter(unreachable=httpx.ConnectError("offline")))
+    assert not monitor.start_speedtest()
+    await monitor.stop()
 
 
 def test_settings_override_defaults_and_survive_corruption(tmp_path: Path) -> None:
@@ -190,7 +249,7 @@ async def test_speed_test_logs_result_with_5g_split(tmp_path: Path) -> None:
     # 10 MB on the receiver port between the phase readings.
     assert sample.mobile_down_bps is not None and sample.mobile_down_bps > 0
     # The CSV keeps whole seconds.
-    logged = DataLog(tmp_path / "logs").speedtest_samples(sample.time - timedelta(seconds=1))
+    logged = router_log(tmp_path).speedtest_samples(sample.time - timedelta(seconds=1))
     assert [(s.down_bps, s.up_bps) for s in logged] == [(100_000_000, 40_000_000)]
     await monitor.stop()
 

@@ -5,7 +5,7 @@ Line monitor for the Telekom Speedport Smart 4 (DSL + external 5G receiver) as a
 ```text
 browser ──HTTP──> FastAPI (web/)  ──> Monitor (app/: polling, state, CSV log)
                                         └──> Speedport client (speedport/) ──HTTPS──> router
-data volume /data: logs/*.csv, settings.json, routers.json, secrets.json, dashboard.json
+data volume /data: settings.json, routers.json, secrets.json, dashboard.json, routers/<serial>/{settings.json,logs/*.csv}
 ```
 
 ## Requirements
@@ -100,7 +100,10 @@ A device password is only valid for one router, so the router is identified by i
 
 - `ROUTER_PASSWORD` is assigned to the first router identified while no router is known yet.
 - A Speedport not seen before is new: the dashboard offers "Set up" (password optional) or "Ignore"; until then only status values (no login) are read.
-- Ignored routers are not monitored. Settings lists set-up and ignored routers; each can be switched or removed (removing deletes its password).
+- Ignored routers are not monitored. Settings lists set-up and ignored routers; each can be switched or removed (removing deletes its password, not its logs).
+- Everything else about a router is stored per serial number too, in `/data/routers/<serial>/`: its interval and speed test settings (`settings.json`) and all its logs (`logs/`). History, normal sync, last speed test and events always show the connected router. The router address is global, because it is needed to find a router. Nothing is logged and no speed test runs until a router is identified.
+- If the router at the address changes (another serial number on a status poll), it is identified again before any login: the previous router's password is never sent to it.
+- Logs from before per-router storage (`/data/logs`, up to 1.4) are moved to the first router identified.
 
 ## Dashboard password
 
@@ -123,7 +126,7 @@ The router allows one login at a time. Line details (DSL, receiver, bonding, LAN
 
 "Run" on the Speed test tab measures latency, download and upload against Cloudflare's speed test endpoints (`speed.cloudflare.com`, plain HTTPS). Cloudflare publishes no terms or limits for third-party or automated use of these endpoints (their own `@cloudflare/speedtest` library uses them by default); users report HTTP 429 after about 10 tests per hour from non-browser clients. WanView identifies itself honestly, respects `Retry-After` on 429 (scheduled tests wait), and schedules at most every 30 minutes. Each throughput phase runs 4 parallel streams for 8 s; the line is saturated for about 20 s and a test moves roughly 100–250 MB, partly over 5G. Automatic tests: Settings → "Speed test every (min)", 0 = off (default, or `SPEEDTEST_INTERVAL`), otherwise 30–1440 minutes.
 
-With a set-up router and a 5G receiver, the receiver port's byte counters are read before and after each phase, so the result is split into DSL and 5G (other traffic during the test counts too). This holds the router login for the test (about 40 s with the readings). Results: `/data/logs/<date>-speedtest.csv` (`time,latency_ms,down_bps,up_bps,mobile_down_bps,mobile_up_bps`) and a History chart. The result measures the host's own connection: a host on Wi-Fi measures Wi-Fi, not the line. Each result is marked:
+With a set-up router and a 5G receiver, the receiver port's byte counters are read before and after each phase, so the result is split into DSL and 5G (other traffic during the test counts too). This holds the router login for the test (about 40 s with the readings). Results: `/data/routers/<serial>/logs/<date>-speedtest.csv` (`time,latency_ms,down_bps,up_bps,mobile_down_bps,mobile_up_bps`) and a History chart. The result measures the host's own connection: a host on Wi-Fi measures Wi-Fi, not the line. Each result is marked:
 
 | Connection | Source | Meaning |
 |---|---|---|
@@ -151,7 +154,7 @@ The normal sync rate is the median of the last 7 days of logged status polls (pe
 
 ## Logs
 
-`/data/logs/<date>-status.csv`, `<date>-line.csv`, `<date>-overflow.csv`, one file per UTC day and kind, timestamps in UTC, not pruned (about 300 KB per day). Also `<date>-speedtest.csv` (see Speed test) and `<date>-events.csv` (`time,kind,value`): the first value seen and every change of `online_since` (reconnect), `firmware`, `dsl_mode`, `dsl_state`, `receiver_state`, `nr_cell`, `lte_cell` (physical cell IDs). 5G/LTE band changes come from the status log. LAN traffic per port is live only: logging it continuously would hold the router's single login.
+`/data/routers/<serial>/logs/<date>-status.csv`, `<date>-line.csv`, `<date>-overflow.csv`, one file per UTC day and kind, timestamps in UTC, not pruned (about 300 KB per day). Also `<date>-speedtest.csv` (see Speed test) and `<date>-events.csv` (`time,kind,value`): the first value seen and every change of `online_since` (reconnect), `firmware`, `dsl_mode`, `dsl_state`, `receiver_state`, `nr_cell`, `lte_cell` (physical cell IDs). 5G/LTE band changes come from the status log. LAN traffic per port is live only: logging it continuously would hold the router's single login.
 
 5G overflow: average 5G rate between details polls from the receiver port's byte counters (`interfaces_hidden_lan.stm`, LAN1, `inte_face_rx/tx[0][1]`); after a container restart the last logged poll (at most three intervals old) is the reference. A counter that goes backwards (router reboot) gives no value.
 

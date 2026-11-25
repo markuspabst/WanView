@@ -174,14 +174,16 @@ def _bps(kbps: int | None) -> int | None:
     return kbps * _KBIT if kbps is not None else None
 
 
-def history(data_log: DataLog, range_name: str, normal_sync: NormalSync) -> dict:
+def history(data_log: DataLog | None, range_name: str, normal_sync: NormalSync) -> dict:
+    """History of the identified router; empty before identification."""
     since = datetime.now(UTC) - HISTORY_RANGES[range_name]
-    lines = data_log.line_samples(since)
+    lines = data_log.line_samples(since) if data_log else []
     pairs = list(zip(lines, lines[1:]))
     crc_rates = [(current, ErrorRate.crc(previous, current)) for previous, current in pairs]
     fec_rates = [(current, ErrorRate.fec(previous, current)) for previous, current in pairs]
-    statuses = data_log.status_samples(since)
-    events = [[_iso(e.time), e.kind.value, e.value] for e in data_log.event_samples(since)] + _band_changes(statuses)
+    statuses = data_log.status_samples(since) if data_log else []
+    logged_events = data_log.event_samples(since) if data_log else []
+    events = [[_iso(e.time), e.kind.value, e.value] for e in logged_events] + _band_changes(statuses)
     return {
         "since": _iso(since),
         "now": _iso(datetime.now(UTC)),
@@ -204,11 +206,11 @@ def history(data_log: DataLog, range_name: str, normal_sync: NormalSync) -> dict
         "overflow": [[_iso(s.time), s.mobile_down_bps, s.mobile_up_bps, s.dsl_leg_up, s.mobile_leg_up,
                       s.dsl_down_limit_kbps and s.dsl_down_limit_kbps * _KBIT,
                       s.dsl_up_limit_kbps and s.dsl_up_limit_kbps * _KBIT]
-                     for s in data_log.overflow_samples(since)],
+                     for s in (data_log.overflow_samples(since) if data_log else [])],
         # [time, down, up, latency ms, host link ("wired", "wifi" or None), 5G part down, up]
         "speedtest": [[_iso(s.time), s.down_bps, s.up_bps, s.latency_ms, s.host_link.value if s.host_link else None,
                        s.mobile_down_bps, s.mobile_up_bps]
-                      for s in data_log.speedtest_samples(since)],
+                      for s in (data_log.speedtest_samples(since) if data_log else [])],
         # [time, kind, new value] in time order: logged events and 5G/LTE band changes
         "events": sorted(events),
     }

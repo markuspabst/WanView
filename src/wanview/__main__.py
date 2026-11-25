@@ -9,7 +9,6 @@ from pathlib import Path
 import uvicorn
 
 from wanview.app.access import DashboardAccess
-from wanview.app.data_log import DataLog
 from wanview.app.monitor import Monitor
 from wanview.app.store import SPEEDTEST_OFF, Settings, Store
 from wanview.speedport.client import DEFAULT_BASE_URL
@@ -51,10 +50,9 @@ def main() -> None:
     )
     warn_removed_variables()
     ensure_writable(data_dir)
-    data_log = DataLog(data_dir / "logs")
     store = Store(data_dir, defaults)
-    monitor = Monitor(store, data_log, initial_password=_secret("ROUTER_PASSWORD"))
-    app = create_app(monitor, data_log, DashboardAccess(store))
+    monitor = Monitor(store, initial_password=_secret("ROUTER_PASSWORD"))
+    app = create_app(monitor, DashboardAccess(store))
     uvicorn.run(app, host=listen_host(), port=int(os.environ.get("PORT", _DEFAULT_PORT)), log_config=None)
 
 
@@ -67,19 +65,18 @@ def warn_removed_variables() -> None:
 def ensure_writable(data_dir: Path) -> None:
     """Exits with a hint instead of a traceback when the data volume is not writable,
     the usual first-run problem with a bind-mounted folder."""
-    for folder in (data_dir, data_dir / "logs"):
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-            probe = folder / ".write-test"
-            probe.write_bytes(b"")
-            probe.unlink()
-        except PermissionError:
-            uid, gid = os.getuid(), os.getgid()
-            log.error("Cannot write to %s: permission denied. WanView runs as uid %d. On the host, give it the "
-                      "data folder (chown -R %d:%d <data folder>) or run the container as the folder's owner "
-                      "(user: \"<uid>:<gid>\" in docker-compose.yml). See README → Troubleshooting.",
-                      folder, uid, uid, gid)
-            raise SystemExit(1)
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        probe = data_dir / ".write-test"
+        probe.write_bytes(b"")
+        probe.unlink()
+    except PermissionError:
+        uid, gid = os.getuid(), os.getgid()
+        log.error("Cannot write to %s: permission denied. WanView runs as uid %d. On the host, give it the "
+                  "data folder (chown -R %d:%d <data folder>) or run the container as the folder's owner "
+                  "(user: \"<uid>:<gid>\" in docker-compose.yml). See README → Troubleshooting.",
+                  data_dir, uid, uid, gid)
+        raise SystemExit(1)
 
 
 def listen_host() -> str:
