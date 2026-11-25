@@ -49,12 +49,33 @@ docker compose up -d          # update: docker compose pull && docker compose up
 
 ### Synology (Container Manager)
 
-1. File Station: create `docker/wanview/data`.
-2. Container Manager → Project → Create: name `wanview`, path `docker/wanview`, source "Create docker-compose.yml", paste this repository's `docker-compose.yml`.
-3. Data folder permissions: either give uid 1000 write access (`sudo chown 1000 /volume1/docker/wanview/data` via SSH), or uncomment `user:` in the compose file with your NAS user's IDs (SSH: `id <user>`, often `1026:100`).
-4. Optionally set the router password in the compose file under `environment:` (replace the `${…:-}` value) or in a `.env` file next to it, then build/start the project. Open the dashboard and choose the dashboard password. Update: Project → Action → Build (pulls the latest image).
+Needs DSM 7.2+ with Container Manager (DSM 7.0/7.1: "Docker" package) on an x86-64 or 64-bit ARM model, in the Speedport's network. On the first Synology install, the permission and DNS steps below were needed.
 
-If `speedport.ip` does not resolve inside the container, set `ROUTER_URL` to the router's IP address (e.g. `https://192.168.2.1`). For the speed test's wired/Wi-Fi detection, uncomment `network_mode: host`.
+1. File Station: create `docker/wanview/data` (on the host: `/volume1/docker/wanview/data`).
+2. Give the container (uid 1000) write access to `data`, one of:
+   - Without SSH: Control Panel → Task Scheduler → Create → Triggered Task → User-defined script, user `root`, event Boot-up, not enabled; command `chown -R 1000:1000 /volume1/docker/wanview/data`. Select the task, Run, then delete it.
+   - SSH: `sudo chown -R 1000:1000 /volume1/docker/wanview/data`.
+   - Run the container as your NAS user instead: uncomment `user:` in the compose file with its IDs (SSH: `id <user>`, often `1026:100`).
+3. Find the router's IP: Control Panel → Network → Network Interface → LAN → Edit, default gateway (Speedport default `192.168.2.1`). Docker on DSM usually cannot resolve `speedport.ip`.
+4. Container Manager → Project → Create: name `wanview`, path `docker/wanview`, source "Create docker-compose.yml", paste this repository's `docker-compose.yml` and set `ROUTER_URL` to `https://<router IP>`. Skip the Web Station portal; Done pulls the image and starts it.
+5. Open `http://<NAS IP>:8080` right away and choose the dashboard password (whoever opens it first chooses). Then set up the router with its device password.
+
+Logs: Container Manager → Container → `wanview` → Log. Update: Project → `wanview` → Action → Build (pulls the image of the configured tag). For the speed test's wired/Wi-Fi detection, uncomment `network_mode: host` (port 8080 must then be free on the NAS).
+
+### Troubleshooting
+
+Problems with the data folder or the router address are logged as one-line warnings that name the fix, and router problems are also shown in the dashboard.
+
+| Log message | Cause and fix |
+|---|---|
+| `Cannot write to /data…: permission denied` (container stops) | The data folder on the host is not writable for uid 1000: `chown -R 1000:1000 <data folder>`, or set `user:` to the folder's owner. |
+| `Cannot resolve speedport.ip` | The host's DNS does not know the Speedport's name (typical in Docker). Settings → Router address or `ROUTER_URL`: `https://<router IP>`, e.g. `https://192.168.2.1`. |
+| `… did not answer` / `No route to …` | Wrong address, or the host is not in the router's network (other router, VLAN, guest network). |
+| `… refused the connection on port …` | Something answers at that address, but not a web server on that port: check the address and `https://`. |
+| `TLS connection to … failed` | Address is not a Speedport, or `http://`/`https://` mixed up. |
+| Port 8080 in use | Map another host port: `"8090:8080"`. |
+| Dashboard password forgotten | Delete `dashboard.json` in the data folder and restart. |
+| `DASHBOARD_PASSWORD is no longer used` | Remove the variable; the password is set in the dashboard. |
 
 ### Build the image yourself
 
@@ -159,7 +180,7 @@ The normal sync rate is the median of the last 7 days of logged status polls (pe
 
 ## Limitations
 
-- Tested with Speedport Smart 4 Typ A, firmware 010139.5.0.001.1, from macOS (Python 3.13). The Docker image is built and published by GitHub Actions (amd64, arm64); it has not been run on a NAS yet.
+- Tested with Speedport Smart 4 Typ A, firmware 010139.5.0.001.1, from macOS (Python 3.13). The Docker image is built and published by GitHub Actions (amd64, arm64); it has been started on a Synology NAS; monitoring the router from there is not yet confirmed.
 - The router's self-signed certificate is not verified (the client only talks to the configured router address).
 - The DSL estimate is too low while Wi-Fi clients transfer and too high during local transfers between wired devices; no Wi-Fi or WAN byte counters are available.
 - The router occasionally reports DSL sync 0 while online, the DSL page 0.0 dB for missing upstream levels, and the receiver RSRP/RSRQ 0.0 without a measurement; all are treated as no value (also in older log rows shown in the history).

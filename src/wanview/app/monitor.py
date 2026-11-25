@@ -45,7 +45,7 @@ from wanview.domain.traffic import (
     LANTrafficRate,
 )
 from wanview.speedport.client import REBOOT_SECONDS, SpeedportClient
-from wanview.speedport.errors import SpeedportError
+from wanview.speedport.errors import SpeedportError, connection_problem
 from wanview.host_network import InterfaceKind, default_interface_kind
 from wanview.speedtest import RateLimited, SpeedTester
 
@@ -276,8 +276,9 @@ class Monitor:
             await self._client.reboot()
             await asyncio.sleep(REBOOT_SECONDS)
         except _NETWORK_ERRORS as error:
-            log.error("Router restart failed: %s", error)
-            self.readings.details_error = f"Router restart failed: {error}"
+            problem = connection_problem(error, self.settings.router_url)
+            log.error("Router restart failed: %s", problem)
+            self.readings.details_error = f"Router restart failed: {problem}"
         self.router_back_time = None
         self._restart()
 
@@ -390,8 +391,9 @@ class Monitor:
                     self._last_counters = (counters, now)
                     self.readings.traffic_error = None
                 except _NETWORK_ERRORS as error:
-                    log.error("LAN traffic poll failed: %s", error)
-                    self.readings.traffic_error = str(error)
+                    problem = connection_problem(error, self.settings.router_url)
+                    log.error("LAN traffic poll failed: %s", problem)
+                    self.readings.traffic_error = problem
                 await asyncio.sleep(TRAFFIC_INTERVAL)
         finally:
             log.info("Live traffic stopped")
@@ -453,8 +455,7 @@ class Monitor:
                 # Not a Speedport Smart; if unreachable, this request raises the network error.
                 model = RouterModel.from_html(await self._client.fetch_start_page())
         except _NETWORK_ERRORS as error:
-            log.error("Router identification failed: %s", error)
-            self.readings.status_error = str(error)
+            self._status_failed("Router identification failed", error)
             return
 
         self.model = model
@@ -487,8 +488,14 @@ class Monitor:
         try:
             self._apply_status(LineStatus.from_vars(await self._client.fetch_public(_STATUS_SOURCE)))
         except _NETWORK_ERRORS as error:
-            log.error("Status poll failed: %s", error)
-            self.readings.status_error = str(error)
+            self._status_failed("Status poll failed", error)
+
+    def _status_failed(self, action: str, error: Exception) -> None:
+        """Warns once per distinct problem; the same failure repeats every status interval."""
+        problem = connection_problem(error, self.settings.router_url)
+        if problem != self.readings.status_error:
+            log.warning("%s: %s", action, problem)
+        self.readings.status_error = problem
 
     def _apply_status(self, status: LineStatus) -> None:
         now = datetime.now(UTC)
@@ -522,8 +529,9 @@ class Monitor:
             if has_receiver:
                 await self._refresh_overflow(now)
         except _NETWORK_ERRORS as error:
-            log.error("Engineer page poll failed: %s", error)
-            self.readings.details_error = str(error)
+            problem = connection_problem(error, self.settings.router_url)
+            log.error("Engineer page poll failed: %s", problem)
+            self.readings.details_error = problem
         finally:
             # The dashboard's live traffic may still be using the session.
             if self._traffic_task is None:

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import socket
 import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -112,6 +113,18 @@ def test_unreadable_dashboard_access_does_not_open_the_dashboard(tmp_path: Path)
     (tmp_path / "dashboard.json").write_text("{broken")
     with pytest.raises(ValueError, match="delete it"):
         Store(tmp_path, DEFAULTS).dashboard_access()
+
+
+async def test_unresolvable_router_gets_an_explained_warning_once(tmp_path: Path,
+                                                                 caplog: pytest.LogCaptureFixture) -> None:
+    failure = httpx.ConnectError("[Errno -2] Name or service not known")
+    failure.__cause__ = socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+    monitor = await started(tmp_path, FakeRouter(unreachable=failure))
+    await monitor._identify()
+    await monitor.stop()
+    assert monitor.readings.status_error.startswith("Cannot resolve speedport.ip")
+    warnings = [record for record in caplog.records if record.levelname == "WARNING"]
+    assert len(warnings) == 1 and "Cannot resolve speedport.ip" in warnings[0].getMessage()
 
 
 def test_settings_override_defaults_and_survive_corruption(tmp_path: Path) -> None:

@@ -29,9 +29,11 @@ class FakeTester:
 class FakeRouter:
     """Records which passwords would have been sent and which pages were read."""
 
-    def __init__(self, serial: str = "SN-A", receiver: bool = False) -> None:
+    def __init__(self, serial: str = "SN-A", receiver: bool = False, unreachable: Exception | None = None) -> None:
         self.serial = serial
         self.receiver = receiver
+        # Raised by every public request, like a failed connection.
+        self.unreachable = unreachable
         self.engineer_reads: list[tuple[str | None, str]] = []
         # Receiver port byte counters; each LAN page read adds LAN_STEP_BYTES.
         self.lan_bytes = 0
@@ -50,6 +52,8 @@ class FakeClient:
         return bool(self._password)
 
     async def fetch_public(self, name: str) -> VarList:
+        if self._router.unreachable:
+            raise self._router.unreachable
         return VarList.from_json(json.dumps([
             {"varid": "title", "varvalue": "Speedport Smart 4 - Konfigurationsprogramm"},
             {"varid": "serial_number", "varvalue": self._router.serial},
@@ -59,6 +63,8 @@ class FakeClient:
         ]))
 
     async def fetch_start_page(self) -> str:
+        if self._router.unreachable:
+            raise self._router.unreachable
         return "<title>Speedport</title>"
 
     async def fetch_engineer_page(self, page: str) -> EngineerPage:

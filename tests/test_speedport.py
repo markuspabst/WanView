@@ -1,10 +1,15 @@
+import errno
+import socket
+import ssl
+
+import httpx
 import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
 
 from wanview.speedport.cipher import DEFAULT_KEY_HEX, AuthenticationFailed, SpeedportCipher
 from wanview.speedport.client import _form_encode
 from wanview.speedport.engineer_page import EngineerPage, number
-from wanview.speedport.errors import MalformedResponse
+from wanview.speedport.errors import LoginRejected, MalformedResponse, connection_problem
 from wanview.speedport.varlist import VarList
 
 # NIST SP 800-38C, Appendix C: the library must match the CCM the web UI's SJCL uses.
@@ -70,3 +75,38 @@ def test_engineer_page_later_assignment_wins() -> None:
 
 def test_form_encoding_matches_swift_client() -> None:
     assert _form_encode({"httoken": "12", "a": "x-y.z~ ä"}) == "a=x%2Dy%2Ez%7E%20%C3%A4&httoken=12"
+
+
+def _failed(cause: BaseException, kind: type[httpx.TransportError] = httpx.ConnectError) -> httpx.TransportError:
+    """httpx error wrapping `cause` the way httpx reports a failed connection."""
+    try:
+        try:
+            raise cause
+        except BaseException as inner:
+            raise kind(str(inner)) from inner
+    except httpx.TransportError as error:
+        return error
+
+
+@pytest.mark.parametrize(("error", "expected"), [
+    (_failed(socket.gaierror(socket.EAI_NONAME, "Name or service not known")),
+     "Cannot resolve speedport.ip"),
+    (_failed(ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")),
+     "speedport.ip refused the connection on port 443"),
+    (_failed(TimeoutError("timed out"), httpx.ConnectTimeout), "speedport.ip did not answer"),
+    (_failed(OSError(errno.EHOSTUNREACH, "No route to host")), "No route to speedport.ip"),
+    (_failed(ssl.SSLError("wrong version number")), "TLS connection to speedport.ip failed"),
+])
+def test_connection_problems_are_explained(error: httpx.TransportError, expected: str) -> None:
+    message = connection_problem(error, "https://speedport.ip")
+    assert message.startswith(expected)
+    assert "Router address" in message
+
+
+def test_dns_problem_suggests_the_router_ip() -> None:
+    error = _failed(socket.gaierror(socket.EAI_NONAME, "Name or service not known"))
+    assert "https://192.168.2.1" in connection_problem(error, "https://speedport.ip")
+
+
+def test_router_errors_keep_their_message() -> None:
+    assert connection_problem(LoginRejected(), "https://speedport.ip") == str(LoginRejected())
