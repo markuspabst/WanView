@@ -246,8 +246,11 @@ async def test_speed_test_logs_result_with_5g_split(tmp_path: Path) -> None:
     await settle()
     sample = monitor.last_speedtest
     assert sample is not None and sample.down_bps == 100_000_000
-    # 10 MB on the receiver port between the phase readings.
-    assert sample.mobile_down_bps is not None and sample.mobile_down_bps > 0
+    # 10 MB on the receiver port during the 1.6 s phase. The router's counters are read
+    # before and after the phase; the rate must use the phase's duration, not the time
+    # between the readings (each reading takes seconds on the real router).
+    assert sample.mobile_down_bps == 50_000_000
+    assert sample.mobile_up_bps == 40_000_000      # capped at the measured total
     # The CSV keeps whole seconds.
     logged = router_log(tmp_path).speedtest_samples(sample.time - timedelta(seconds=1))
     assert [(s.down_bps, s.up_bps) for s in logged] == [(100_000_000, 40_000_000)]

@@ -324,24 +324,27 @@ class Monitor:
         # wired or on Wi-Fi. Needs the router login.
         read_counters = self._may_use_login()
         has_receiver = self.readings.status is not None and self.readings.status.has_receiver
-        readings: dict[tuple[str, str], tuple[LANCounters, float]] = {}
+        readings: dict[tuple[str, str], LANCounters] = {}
 
         async def around_phase(phase: str, edge: str) -> None:
             if read_counters:
-                counters = LANCounters.from_page(await self._client.fetch_engineer_page(LAN_PAGE))
-                readings[(phase, edge)] = (counters, time.monotonic())
+                readings[(phase, edge)] = LANCounters.from_page(await self._client.fetch_engineer_page(LAN_PAGE))
 
-        def phase_rate(phase: str) -> LANTrafficRate | None:
+        def phase_rate(phase: str, seconds: float) -> LANTrafficRate | None:
+            """Port rates during a phase. The readings enclose the phase, so they hold all its
+            bytes; dividing by the time between them instead of the phase's duration would
+            understate the rates by the seconds each reading takes."""
             if (phase, "start") not in readings or (phase, "end") not in readings:
                 return None
-            (before, start), (after, end) = readings[(phase, "start")], readings[(phase, "end")]
-            return LANTrafficRate.between(before, after, end - start)
+            return LANTrafficRate.between(readings[(phase, "start")], readings[(phase, "end")], seconds)
 
-        def mobile_bps(rate: LANTrafficRate | None, direction: str) -> int | None:
+        def mobile_bps(rate: LANTrafficRate | None, direction: str, total_bps: int) -> int | None:
             if rate is None or not has_receiver:
                 return None
             hybrid = HybridTrafficRate.from_lan(rate)
-            return hybrid.mobile_down_bps if direction == "down" else hybrid.mobile_up_bps
+            mobile = hybrid.mobile_down_bps if direction == "down" else hybrid.mobile_up_bps
+            # Other traffic on the receiver port during the test can push it above the total.
+            return None if mobile is None else min(mobile, total_bps)
 
         def wired_bps(rate: LANTrafficRate | None, direction: str) -> int | None:
             if rate is None:
@@ -351,14 +354,16 @@ class Monitor:
 
         try:
             measurement = await self._speed_tester.run(around_phase)
-            down_rate, up_rate = phase_rate("download"), phase_rate("upload")
+            down_rate = phase_rate("download", measurement.down_seconds)
+            up_rate = phase_rate("upload", measurement.up_seconds)
             # The host's own interface is reliable; the router's port counters cannot see Wi-Fi
             # behind a mesh access point on a LAN port.
             kind = self._host_interface_kind()
             link = _HOST_LINKS[kind] if kind else link_from_router_ports(
                 measurement.down_bps, measurement.up_bps, wired_bps(down_rate, "down"), wired_bps(up_rate, "up"))
             sample = SpeedTestSample(datetime.now(UTC), measurement.latency_ms, measurement.down_bps,
-                                     measurement.up_bps, mobile_bps(down_rate, "down"), mobile_bps(up_rate, "up"), link)
+                                     measurement.up_bps, mobile_bps(down_rate, "down", measurement.down_bps),
+                                     mobile_bps(up_rate, "up", measurement.up_bps), link)
             self.last_speedtest = sample
             self.speedtest_error = None
             if self.data_log is not None:

@@ -8,6 +8,8 @@ from wanview.speedtest import Measurement
 
 
 LAN_STEP_BYTES = 10_000_000
+# Length of each fake throughput phase: one LAN_STEP_BYTES on the receiver port per phase is 50 Mbit/s.
+PHASE_SECONDS = 1.6
 
 
 class FakeTester:
@@ -23,7 +25,8 @@ class FakeTester:
             if around_phase:
                 await around_phase(phase, "start")
                 await around_phase(phase, "end")
-        return Measurement(latency_ms=20.0, down_bps=100_000_000, up_bps=40_000_000)
+        return Measurement(latency_ms=20.0, down_bps=100_000_000, up_bps=40_000_000,
+                           down_seconds=PHASE_SECONDS, up_seconds=PHASE_SECONDS)
 
 
 class FakeRouter:

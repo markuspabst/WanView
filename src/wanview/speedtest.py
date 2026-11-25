@@ -54,6 +54,9 @@ class Measurement:
     latency_ms: float
     down_bps: int
     up_bps: int
+    down_seconds: float
+    """Duration of the download phase; rates of router counters read around it use this."""
+    up_seconds: float
 
 
 class SpeedTester:
@@ -66,9 +69,10 @@ class SpeedTester:
     async def run(self, around_phase: Callable[[str, str], Awaitable[None]] | None = None) -> Measurement:
         async with httpx.AsyncClient(base_url=self._base_url, timeout=_TIMEOUT_SECONDS) as http:
             latency = await self._latency(http)
-            down = await self._timed("download", around_phase, lambda deadline: self._download(http, deadline))
-            up = await self._timed("upload", around_phase, lambda deadline: self._upload(http, deadline))
-        return Measurement(latency_ms=latency, down_bps=down, up_bps=up)
+            down, down_seconds = await self._timed("download", around_phase,
+                                                   lambda deadline: self._download(http, deadline))
+            up, up_seconds = await self._timed("upload", around_phase, lambda deadline: self._upload(http, deadline))
+        return Measurement(latency_ms=latency, down_bps=down, up_bps=up, down_seconds=down_seconds, up_seconds=up_seconds)
 
     async def _latency(self, http: httpx.AsyncClient) -> float:
         rounds = []
@@ -80,7 +84,8 @@ class SpeedTester:
         return statistics.median(rounds)
 
     async def _timed(self, name: str, around_phase: Callable[[str, str], Awaitable[None]] | None,
-                     stream: Callable[[float], Awaitable[int]]) -> int:
+                     stream: Callable[[float], Awaitable[int]]) -> tuple[int, float]:
+        """Rate in bit/s and duration in seconds of one phase."""
         if around_phase:
             await around_phase(name, "start")
         start = time.perf_counter()
@@ -89,7 +94,7 @@ class SpeedTester:
         elapsed = time.perf_counter() - start
         if around_phase:
             await around_phase(name, "end")
-        return int(moved * _BITS_PER_BYTE / elapsed)
+        return int(moved * _BITS_PER_BYTE / elapsed), elapsed
 
     async def _download(self, http: httpx.AsyncClient, deadline: float) -> int:
         moved = 0
