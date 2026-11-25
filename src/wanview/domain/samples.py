@@ -334,3 +334,53 @@ class SpeedTestSample:
         link = fields[6] if len(fields) == cls._FIELD_COUNT else ""
         return cls(time, latency, down, up, _int(fields[4]), _int(fields[5]),
                    HostLink(link) if link in HostLink._value2member_map_ else None)
+
+
+class EventKind(StrEnum):
+    """Values that are not measurements but whose changes matter: reconnects, firmware
+    updates, DSL retrains, receiver restarts, cell handovers."""
+
+    ONLINE_SINCE = "online_since"
+    FIRMWARE = "firmware"
+    DSL_MODE = "dsl_mode"
+    DSL_STATE = "dsl_state"
+    RECEIVER_STATE = "receiver_state"
+    NR_CELL = "nr_cell"
+    LTE_CELL = "lte_cell"
+
+
+@dataclass(frozen=True)
+class EventSample:
+    """A changed value (WanView only; Linkbar has no such log). The first value seen
+    is logged too, so every later change has its predecessor in the log."""
+
+    time: datetime
+    kind: EventKind
+    value: str
+
+    CSV_HEADER = "time,kind,value"
+    _FIELD_COUNT = 3
+
+    @property
+    def csv_row(self) -> str:
+        return _row([_time(self.time), self.kind.value, self.value])
+
+    @classmethod
+    def from_csv(cls, row: str) -> "EventSample | None":
+        fields = _fields(row, cls._FIELD_COUNT)
+        time = _parse_time(fields[0]) if fields else None
+        if fields is None or time is None or fields[1] not in EventKind._value2member_map_ or not fields[2]:
+            return None
+        return cls(time, EventKind(fields[1]), fields[2])
+
+
+def status_events(status: LineStatus) -> dict[EventKind, str | None]:
+    return {EventKind.ONLINE_SINCE: status.online_since, EventKind.FIRMWARE: status.firmware_version}
+
+
+def details_events(dsl: DSLDetails, receiver: ReceiverStatus | None) -> dict[EventKind, str | None]:
+    values = {EventKind.DSL_MODE: dsl.operating_mode, EventKind.DSL_STATE: dsl.state}
+    if receiver is not None:
+        values.update({EventKind.RECEIVER_STATE: receiver.status, EventKind.NR_CELL: receiver.nr.physical_cell_id,
+                       EventKind.LTE_CELL: receiver.lte.physical_cell_id})
+    return values

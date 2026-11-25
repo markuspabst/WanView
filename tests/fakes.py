@@ -34,6 +34,8 @@ class FakeRouter:
         self.receiver = receiver
         # Raised by every public request, like a failed connection.
         self.unreachable = unreachable
+        self.online_since = "2026-11-24 10:00:00"
+        self.dsl_state = "0x801 (showtime)"
         self.engineer_reads: list[tuple[str | None, str]] = []
         # Receiver port byte counters; each LAN page read adds LAN_STEP_BYTES.
         self.lan_bytes = 0
@@ -58,6 +60,7 @@ class FakeClient:
             {"varid": "title", "varvalue": "Speedport Smart 4 - Konfigurationsprogramm"},
             {"varid": "serial_number", "varvalue": self._router.serial},
             {"varid": "onlinestatus", "varvalue": "online"},
+            {"varid": "inet_uptime", "varvalue": self._router.online_since},
             {"varid": "use_lte", "varvalue": "1" if self._router.receiver else "0"},
             {"varid": "ex5g_model_name", "varvalue": "5G-EmpfaengerSE" if self._router.receiver else ""},
         ]))
@@ -73,7 +76,8 @@ class FakeClient:
             self._router.lan_bytes += LAN_STEP_BYTES
             bytes_ = self._router.lan_bytes
             return EngineerPage(f"var max_interface = 1;\ninte_face_rx[0][1] = {bytes_};\ninte_face_tx[0][1] = {bytes_};")
-        return EngineerPage('downstream_status[2] = " 8.2 dB";')
+        return EngineerPage(f'var dsl_opmode = "VDSL2 Annex B";\nvar dsl_state = "{self._router.dsl_state}";\n'
+                            'downstream_status[2] = " 8.2 dB";')
 
     async def logout(self) -> None:
         pass

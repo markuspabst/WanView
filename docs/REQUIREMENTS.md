@@ -52,6 +52,7 @@ Verification: *test* = automated test in `tests/` (`pytest`); *manual* = checked
 | UR-41 | Each chart can be collapsed. | Collapsed state kept across reloads and refreshes. | manual (script run with stub DOM) | met |
 | UR-42 | Charts are visually separated. | Each chart in its own card. | manual | met |
 | UR-43 | Hybrid bonding is shown in history instead of plain traffic. | 5G overflow with the DSL limit, periods with a bonding leg down shaded red. | test (`test_history_includes_bonding_state`), manual | met |
+| UR-44 | All important values are logged over time and shown in history. | Every logged measurement has a chart (incl. FEC, attenuation, internet rate, DSL overflow limit, speed test DSL/5G split); reconnects, firmware, DSL mode/state, receiver state, cells and bands are logged as change events and listed per tab. LAN traffic per port stays live only (needs the router's single login). | test (`test_changed_values_are_logged_as_events_once`, `test_events_are_not_repeated_after_restart`, `test_history_includes_all_logged_values`); charts and event lists scripted (jsdom) with crafted history; not checked against a live router | partly |
 
 ## Speed test
 

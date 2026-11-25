@@ -584,6 +584,35 @@ function timeLabels(plot, start, end) {
   }
 }
 
+// Changed values (reconnects, firmware, DSL mode/state, receiver state, cells, bands), newest first.
+const EVENT_LABELS = {
+  online_since: "Internet connected since", firmware: "Firmware", dsl_mode: "DSL mode", dsl_state: "DSL state",
+  receiver_state: "Receiver state", nr_cell: "5G cell (PCI)", lte_cell: "LTE cell (PCI)", nr_band: "5G band", lte_band: "LTE band",
+};
+const MAX_EVENTS_SHOWN = 100;
+
+function eventsCard(title, events, kinds) {
+  const box = element("details", { class: "chart" });
+  box.open = !collapsedCharts().has(title);
+  box.addEventListener("toggle", () => rememberCollapsed(title, !box.open));
+  const heading = element("summary", {});
+  heading.append(element("span", {}, title),
+                 element("span", { class: "muted note" }, "first value seen, then every change"));
+  box.append(heading);
+  const shown = events.filter((e) => kinds.includes(e[1])).reverse().slice(0, MAX_EVENTS_SHOWN);
+  if (shown.length === 0) {
+    box.append(element("p", { class: "muted" }, "No data available"));
+    return box;
+  }
+  const list = element("dl", { class: "events" });
+  for (const [time, kind, value] of shown) {
+    const when = new Date(time).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    list.append(element("dt", {}, when), element("dd", {}, `${EVENT_LABELS[kind]}: ${value}`));
+  }
+  box.append(list);
+  return box;
+}
+
 // 5G overflow (average per details poll); red: a bonding leg was down. Each overflow row:
 // [time, 5G down, 5G up, DSL leg up, 5G leg up, DSL limit down, DSL limit up].
 function bondingChart(rows, start, end, maxGapMs) {
@@ -637,6 +666,13 @@ async function refreshHistory() {
           { note: "line capacity; a slow decline means a degrading line" }),
     chart("CRC errors", "per hour", ["↓ down", "↑ up"], series(h.crc, (r) => [r[1], r[2]]), start, end, detailsGap,
           { note: "uncorrectable; 0 is normal" }),
+    chart("FEC errors", "per hour", ["↓ down", "↑ up"], series(h.fec, (r) => [r[1], r[2]]), start, end, detailsGap,
+          { note: "corrected; normal in operation, a jump hints at interference" }),
+    chart("Attenuation", "dB", ["↓ down", "↑ up"], series(h.line, (r) => [r[7], r[8]]), start, end, detailsGap,
+          { note: "stable on a healthy line" }),
+    chart("Internet rate", "Mbit/s", ["↓ down", "↑ up"], series(h.status, (r) => [mbit(r[6]), mbit(r[7])]), start, end,
+          statusGap, { note: "as reported by the router" }),
+    eventsCard("Connection and DSL events", h.events, ["online_since", "firmware", "dsl_mode", "dsl_state"]),
   );
   // Tests are minutes to hours apart: connect them all, mark each one.
   // Tests from a host on Wi-Fi measure Wi-Fi, not the line: they get their own panel in
@@ -655,12 +691,24 @@ async function refreshHistory() {
   }
   panels.push(chart("Latency", "ms", ["latency"], tests(h.speedtest, (r) => [r[3]]), start, end, Infinity,
                     { dots: true, wifiNote: wifiTests.length ? "Wi-Fi" : null }));
+  // DSL / 5G split from the receiver port during each test (needs device password and receiver).
+  const splitTests = h.speedtest.filter((r) => r[5] !== null && r[5] !== undefined);
+  if (splitTests.length) {
+    const split = (total, mobile) => [mbit(Math.max(0, total - mobile)), mbit(mobile)];
+    panels.push(chart("Download: DSL and 5G", "Mbit/s", ["DSL", "5G"], tests(splitTests, (r) => split(r[1], r[5])),
+                      start, end, Infinity, { dots: true }),
+                chart("Upload: DSL and 5G", "Mbit/s", ["DSL", "5G"], tests(splitTests, (r) => split(r[2], r[6])),
+                      start, end, Infinity, { dots: true }));
+  }
   document.getElementById("charts-speedtest").replaceChildren(...panels);
   document.getElementById("charts-mobile").replaceChildren(
     chart("Receiver signal (RSRP)", "dBm", ["5G", "LTE"], series(h.status, (r) => [r[3], r[4]]), start, end, statusGap),
     chart("Signal quality (RSRQ)", "dB", ["5G", "LTE"], series(h.line, (r) => [r[5], r[6]]), start, end, detailsGap,
           { note: "interference and load; below −20 dB is poor" }),
     bondingChart(h.overflow, start, end, detailsGap),
+    chart("DSL overflow limit", "Mbit/s", ["↓ down", "↑ up"], series(h.overflow, (r) => [mbit(r[5]), mbit(r[6])]),
+          start, end, detailsGap, { note: "above this DSL rate traffic overflows to 5G" }),
+    eventsCard("Receiver events", h.events, ["receiver_state", "nr_cell", "lte_cell", "nr_band", "lte_band"]),
   );
 }
 

@@ -85,5 +85,9 @@ form.settings input[type=number] { width: 90px; }
 .header-action { margin-left: auto; font-weight: normal; padding: 3px 10px; }
 .chart .band { fill: var(--poor); opacity: .15; }
 .chart .note { font-weight: normal; }
+.chart .events { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 10px 14px 12px;
+  max-height: 240px; overflow-y: auto; font-size: 13px; }
+.chart .events dt { color: var(--muted); font-variant-numeric: tabular-nums; }
+.chart .events dd { margin: 0; }
 .charts .card { margin-bottom: 0; }
 #charts-speedtest { display: grid; gap: 16px; }

@@ -27,13 +27,17 @@ from wanview.app.store import Choice, KnownRouter, Settings, Store
 from wanview.domain.line import DSL_PAGE, RECEIVER_PAGE, DSLDetails, ReceiverStatus
 from wanview.domain.samples import (
     ErrorRate,
+    EventKind,
+    EventSample,
     LineSample,
     NormalSync,
     OverflowSample,
     SpeedTestSample,
     StatusSample,
     HostLink,
+    details_events,
     link_from_router_ports,
+    status_events,
 )
 from wanview.domain.status import LineStatus, RouterModel
 from wanview.domain.traffic import (
@@ -67,6 +71,8 @@ _SECONDS_PER_MINUTE = 60
 # The last result shown after a restart comes from the log of this window.
 _SPEEDTEST_HISTORY = timedelta(days=7)
 _BITS_PER_MEGABIT = 1_000_000
+# Last logged value per event kind is looked up this far back after a restart.
+_EVENT_MEMORY = timedelta(days=30)
 _HOST_LINKS = {InterfaceKind.WIRED: HostLink.WIRED, InterfaceKind.WIFI: HostLink.WIFI}
 
 
@@ -125,6 +131,9 @@ class Monitor:
         self._last_line: LineSample | None = None
         # The log may stem from another router after the address or router changed.
         self._logged_reference_usable = True
+        # Last value per event kind, so only changes are logged, also across restarts.
+        self._event_values: dict[EventKind, str] = {
+            event.kind: event.value for event in data_log.event_samples(datetime.now(UTC) - _EVENT_MEMORY)}
 
     # Lifecycle
 
@@ -503,6 +512,15 @@ class Monitor:
         self.readings.status_time = now
         self.readings.status_error = None
         self._log.append_status(StatusSample.from_status(now, status))
+        self._log_changes(now, status_events(status))
+
+    def _log_changes(self, now: datetime, values: dict[EventKind, str | None]) -> None:
+        for kind, value in values.items():
+            if not value or self._event_values.get(kind) == value:
+                continue
+            log.info("%s: %s", kind.value, value)
+            self._log.append_event(EventSample(now, kind, value))
+            self._event_values[kind] = value
 
     def _refresh_normal_sync(self) -> None:
         since = datetime.now(UTC) - _NORMAL_SYNC_WINDOW
@@ -526,6 +544,7 @@ class Monitor:
             self.readings.details_time = now
             self.readings.details_error = None
             self._log.append_line(sample)
+            self._log_changes(now, details_events(dsl, receiver))
             if has_receiver:
                 await self._refresh_overflow(now)
         except _NETWORK_ERRORS as error:

@@ -4,6 +4,7 @@
     2026-11-23-line.csv     every line-details poll
     2026-11-23-overflow.csv every line-details poll with a 5G receiver
     2026-11-23-speedtest.csv every speed test (WanView only)
+    2026-11-23-events.csv   changed values: reconnects, firmware, DSL mode/state, receiver state, cells (WanView only)
 
 Files are not pruned (about 300 KB per day). Not thread-safe: use from the event loop.
 """
@@ -13,12 +14,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, TypeVar
 
-from wanview.domain.samples import LineSample, OverflowSample, SpeedTestSample, StatusSample
+from wanview.domain.samples import EventSample, LineSample, OverflowSample, SpeedTestSample, StatusSample
 
 _STATUS = "status"
 _LINE = "line"
 _OVERFLOW = "overflow"
 _SPEEDTEST = "speedtest"
+_EVENTS = "events"
 
 
 class _Sample(Protocol):
@@ -28,7 +30,7 @@ class _Sample(Protocol):
     def csv_row(self) -> str: ...
 
 
-SampleT = TypeVar("SampleT", StatusSample, LineSample, OverflowSample, SpeedTestSample)
+SampleT = TypeVar("SampleT", StatusSample, LineSample, OverflowSample, SpeedTestSample, EventSample)
 
 
 class DataLog:
@@ -47,6 +49,12 @@ class DataLog:
 
     def append_speedtest(self, sample: SpeedTestSample) -> None:
         self._append(sample, SpeedTestSample.CSV_HEADER, _SPEEDTEST)
+
+    def append_event(self, sample: EventSample) -> None:
+        self._append(sample, EventSample.CSV_HEADER, _EVENTS)
+
+    def event_samples(self, since: datetime) -> list[EventSample]:
+        return self._read(_EVENTS, since, EventSample.from_csv)
 
     def speedtest_samples(self, since: datetime) -> list[SpeedTestSample]:
         return self._read(_SPEEDTEST, since, SpeedTestSample.from_csv)

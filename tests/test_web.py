@@ -11,7 +11,7 @@ from wanview.app.data_log import DataLog
 from wanview.app.monitor import Monitor
 from wanview.app.store import Settings, Store
 from wanview.domain.line import DSLDetails
-from wanview.domain.samples import LineSample, OverflowSample, StatusSample
+from wanview.domain.samples import EventKind, EventSample, LineSample, OverflowSample, SpeedTestSample, StatusSample
 from wanview.domain.status import LineStatus
 from wanview.speedport.engineer_page import EngineerPage
 from wanview.speedport.varlist import VarList
@@ -97,6 +97,34 @@ def test_dashboard_password_must_not_be_empty(tmp_path: Path) -> None:
     with client(tmp_path, FakeRouter()) as api:
         assert api.put("/api/dashboard-access", json={"password": ""}).status_code == 422
         assert api.get("/api/state").json()["dashboardAccess"] == "unset"
+
+
+def test_history_includes_all_logged_values(tmp_path: Path) -> None:
+    data_log = DataLog(tmp_path / "logs")
+    start = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+    for minutes, band, fec in ((0, "n78", 1000), (30, "n28", 1600)):
+        time = start + timedelta(minutes=minutes)
+        status = LineStatus.from_vars(VarList.from_json(
+            '[{"varid":"onlinestatus","varvalue":"online"},{"varid":"inet_download","varvalue":"250000"},'
+            f'{{"varid":"inet_upload","varvalue":"40000"}},{{"varid":"ex5g_freq_5g","varvalue":"{band}"}}]'))
+        data_log.append_status(StatusSample.from_status(time, status))
+        dsl = DSLDetails.from_page(EngineerPage(f'downstream_status[4] = " 12.5 dB";\ndownstream_status[10] = "{fec}";'))
+        data_log.append_line(LineSample.from_details(time, dsl, None))
+    data_log.append_speedtest(SpeedTestSample(start, 20.0, 300_000_000, 50_000_000, 80_000_000, 5_000_000))
+    data_log.append_event(EventSample(start, EventKind.ONLINE_SINCE, "2026-11-24 10:00:00"))
+
+    with client(tmp_path, FakeRouter()) as api:
+        h = api.get("/api/history?range=day").json()
+    assert h["status"][0][6:] == [250_000, 40_000]
+    assert h["line"][0][7] == 12.5
+    assert h["fec"][0][1] == 1200.0                # 600 corrected errors in 30 min
+    assert h["speedtest"][0][5:] == [80_000_000, 5_000_000]
+    events = [row[1:] for row in h["events"] if row[0] <= _iso(start + timedelta(minutes=30))]
+    assert events == [["online_since", "2026-11-24 10:00:00"], ["nr_band", "n28"]]
+
+
+def _iso(time: datetime) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def test_dashboard_files_are_revalidated_on_every_load(tmp_path: Path) -> None:

@@ -12,7 +12,7 @@ import httpx
 from wanview.app.data_log import DataLog
 from wanview.app.monitor import Monitor
 from wanview.app.store import Choice, Settings, Store
-from wanview.domain.samples import HostLink, StatusSample
+from wanview.domain.samples import EventKind, HostLink, StatusSample
 from wanview.host_network import InterfaceKind
 from wanview.speedtest import RateLimited
 from wanview.domain.status import LineStatus
@@ -125,6 +125,34 @@ async def test_unresolvable_router_gets_an_explained_warning_once(tmp_path: Path
     assert monitor.readings.status_error.startswith("Cannot resolve speedport.ip")
     warnings = [record for record in caplog.records if record.levelname == "WARNING"]
     assert len(warnings) == 1 and "Cannot resolve speedport.ip" in warnings[0].getMessage()
+
+
+async def test_changed_values_are_logged_as_events_once(tmp_path: Path) -> None:
+    router = FakeRouter()
+    monitor = await started(tmp_path, router, initial_password="secret")
+    await monitor._refresh_status()
+    router.online_since, router.dsl_state = "2026-11-25 03:00:00", "0x302 (training)"
+    await monitor._refresh_status()
+    await monitor._refresh_details()
+    await monitor.stop()
+
+    events = [(e.kind, e.value) for e in DataLog(tmp_path / "logs").event_samples(datetime.now(UTC) - timedelta(hours=1))]
+    assert events == [
+        (EventKind.ONLINE_SINCE, "2026-11-24 10:00:00"),
+        (EventKind.DSL_MODE, "VDSL2 Annex B"),
+        (EventKind.DSL_STATE, "0x801 (showtime)"),
+        (EventKind.ONLINE_SINCE, "2026-11-25 03:00:00"),
+        (EventKind.DSL_STATE, "0x302 (training)"),
+    ]
+
+
+async def test_events_are_not_repeated_after_restart(tmp_path: Path) -> None:
+    monitor = await started(tmp_path, FakeRouter(), initial_password="secret")
+    await monitor.stop()
+    monitor = await started(tmp_path, FakeRouter(), store=Store(tmp_path, DEFAULTS))
+    await monitor.stop()
+    events = DataLog(tmp_path / "logs").event_samples(datetime.now(UTC) - timedelta(hours=1))
+    assert len(events) == 3
 
 
 def test_settings_override_defaults_and_survive_corruption(tmp_path: Path) -> None:

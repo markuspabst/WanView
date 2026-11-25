@@ -6,13 +6,16 @@ from datetime import UTC, datetime, timedelta
 from wanview.app.data_log import DataLog
 from wanview.app.monitor import Monitor
 from wanview.domain.line import Cell
-from wanview.domain.samples import ErrorRate, NormalSync
+from wanview.domain.samples import ErrorRate, NormalSync, StatusSample
 from wanview.domain.quality import Quality, crc_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality, worst
 from wanview.domain.traffic import HybridTrafficRate
 
 _KBIT = 1000
 _ONLINE = "online"
 _RUNNING = "running"
+# Event kinds derived from the status log (the other kinds are logged as events).
+_NR_BAND = "nr_band"
+_LTE_BAND = "lte_band"
 HISTORY_RANGES = {"day": timedelta(days=1), "week": timedelta(days=7), "month": timedelta(days=30)}
 
 
@@ -174,27 +177,56 @@ def _bps(kbps: int | None) -> int | None:
 def history(data_log: DataLog, range_name: str, normal_sync: NormalSync) -> dict:
     since = datetime.now(UTC) - HISTORY_RANGES[range_name]
     lines = data_log.line_samples(since)
-    crc_rates = [(current, ErrorRate.crc(previous, current)) for previous, current in zip(lines, lines[1:])]
+    pairs = list(zip(lines, lines[1:]))
+    crc_rates = [(current, ErrorRate.crc(previous, current)) for previous, current in pairs]
+    fec_rates = [(current, ErrorRate.fec(previous, current)) for previous, current in pairs]
+    statuses = data_log.status_samples(since)
+    events = [[_iso(e.time), e.kind.value, e.value] for e in data_log.event_samples(since)] + _band_changes(statuses)
     return {
         "since": _iso(since),
         "now": _iso(datetime.now(UTC)),
         "normalSync": [normal_sync.down_bps, normal_sync.up_bps],
-        # [time, sync down, sync up, 5G dBm, LTE dBm, online]
+        # [time, sync down, sync up, 5G dBm, LTE dBm, online, internet rate down, up]
         "status": [[_iso(s.time), _sync(s.dsl_downstream, s.online_status == _ONLINE),
-                    _sync(s.dsl_upstream, s.online_status == _ONLINE), s.nr_signal, s.lte_signal, s.online_status == _ONLINE]
-                   for s in data_log.status_samples(since)],
-        # [time, SNR down, SNR up, attainable down, attainable up (bit/s), 5G RSRQ, LTE RSRQ]
+                    _sync(s.dsl_upstream, s.online_status == _ONLINE), s.nr_signal, s.lte_signal, s.online_status == _ONLINE,
+                    s.internet_download, s.internet_upload]
+                   for s in statuses],
+        # [time, SNR down, SNR up, attainable down, attainable up (bit/s), 5G RSRQ, LTE RSRQ,
+        #  attenuation down, up (dB)]
         "line": [[_iso(s.time), s.snr_margin_down, s.snr_margin_up, _bps(s.attainable_down_kbps),
-                  _bps(s.attainable_up_kbps), _measured(s.nr_rsrq), _measured(s.lte_rsrq)] for s in lines],
+                  _bps(s.attainable_up_kbps), _measured(s.nr_rsrq), _measured(s.lte_rsrq),
+                  s.attenuation_down, s.attenuation_up] for s in lines],
         # [time, CRC errors per hour down, up] between consecutive line polls
-        "crc": [[_iso(current.time), rate.down_per_hour if rate else None, rate.up_per_hour if rate else None]
-                for current, rate in crc_rates],
+        "crc": _rates(crc_rates),
+        # [time, corrected (FEC) errors per hour down, up]
+        "fec": _rates(fec_rates),
         # [time, 5G down, 5G up, DSL leg up, 5G leg up, DSL limit down, DSL limit up] (bit/s)
         "overflow": [[_iso(s.time), s.mobile_down_bps, s.mobile_up_bps, s.dsl_leg_up, s.mobile_leg_up,
                       s.dsl_down_limit_kbps and s.dsl_down_limit_kbps * _KBIT,
                       s.dsl_up_limit_kbps and s.dsl_up_limit_kbps * _KBIT]
                      for s in data_log.overflow_samples(since)],
-        # [time, down, up, latency ms, host link ("wired", "wifi" or None)]
-        "speedtest": [[_iso(s.time), s.down_bps, s.up_bps, s.latency_ms, s.host_link.value if s.host_link else None]
+        # [time, down, up, latency ms, host link ("wired", "wifi" or None), 5G part down, up]
+        "speedtest": [[_iso(s.time), s.down_bps, s.up_bps, s.latency_ms, s.host_link.value if s.host_link else None,
+                       s.mobile_down_bps, s.mobile_up_bps]
                       for s in data_log.speedtest_samples(since)],
+        # [time, kind, new value] in time order: logged events and 5G/LTE band changes
+        "events": sorted(events),
     }
+
+
+def _rates(rates: list) -> list:
+    return [[_iso(current.time), rate.down_per_hour if rate else None, rate.up_per_hour if rate else None]
+            for current, rate in rates]
+
+
+def _band_changes(statuses: list[StatusSample]) -> list[list]:
+    """Bands are logged with every status poll; only their changes are events."""
+    changes = []
+    previous: dict[str, str | None] = {}
+    for sample in statuses:
+        for kind, band in ((_NR_BAND, sample.nr_band), (_LTE_BAND, sample.lte_band)):
+            if band and kind in previous and band != previous[kind]:
+                changes.append([_iso(sample.time), kind, band])
+            if band:
+                previous[kind] = band
+    return changes
