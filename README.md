@@ -7,7 +7,7 @@ Server counterpart of the macOS menu bar app Linkbar; same protocol, same rating
 ```text
 browser ──HTTP──> FastAPI (web/)  ──> Monitor (app/: polling, state, CSV log)
                                         └──> Speedport client (speedport/) ──HTTPS──> router
-data volume /data: logs/*.csv, settings.json, routers.json, secrets.json
+data volume /data: logs/*.csv, settings.json, routers.json, secrets.json, dashboard.json
 ```
 
 ## Requirements
@@ -32,11 +32,11 @@ Image: `ghcr.io/markuspabst/wanview` for `linux/amd64` and `linux/arm64`, built 
 mkdir -p wanview/data && sudo chown 1000 wanview/data   # the container runs as uid 1000
 docker run -d --name wanview --restart unless-stopped -p 8080:8080 \
   -v "$PWD/wanview/data:/data" \
-  -e ROUTER_PASSWORD='device password' -e DASHBOARD_PASSWORD='dashboard password' \
+  -e ROUTER_PASSWORD='device password' \
   ghcr.io/markuspabst/wanview:latest
 ```
 
-Dashboard: `http://<host>:8080`. Both passwords are optional: the router password can be entered in the dashboard, and without a dashboard password the dashboard is open to the network.
+Dashboard: `http://<host>:8080`. On first open it asks for a dashboard password or to keep the dashboard open (see [Dashboard password](#dashboard-password)). The router password is optional here; it can be entered in the dashboard.
 
 ### Docker Compose
 
@@ -52,7 +52,7 @@ docker compose up -d          # update: docker compose pull && docker compose up
 1. File Station: create `docker/wanview/data`.
 2. Container Manager → Project → Create: name `wanview`, path `docker/wanview`, source "Create docker-compose.yml", paste this repository's `docker-compose.yml`.
 3. Data folder permissions: either give uid 1000 write access (`sudo chown 1000 /volume1/docker/wanview/data` via SSH), or uncomment `user:` in the compose file with your NAS user's IDs (SSH: `id <user>`, often `1026:100`).
-4. Set passwords in the compose file under `environment:` (replace the `${…:-}` values) or in a `.env` file next to it, then build/start the project. Update: Project → Action → Build (pulls the latest image).
+4. Optionally set the router password in the compose file under `environment:` (replace the `${…:-}` value) or in a `.env` file next to it, then build/start the project. Open the dashboard and choose the dashboard password. Update: Project → Action → Build (pulls the latest image).
 
 If `speedport.ip` does not resolve inside the container, set `ROUTER_URL` to the router's IP address (e.g. `https://192.168.2.1`). For the speed test's wired/Wi-Fi detection, uncomment `network_mode: host`.
 
@@ -78,7 +78,6 @@ Tests: `.venv/bin/pip install -r requirements-dev.txt && .venv/bin/pytest`
 |---|---|---|
 | `ROUTER_URL` | `https://speedport.ip` | router address (dashboard setting takes precedence) |
 | `ROUTER_PASSWORD` / `ROUTER_PASSWORD_FILE` | – | device password for the first router identified |
-| `DASHBOARD_PASSWORD` / `DASHBOARD_PASSWORD_FILE` | – | dashboard login (HTTP basic auth, any user name); empty: no login |
 | `STATUS_INTERVAL` | `30` | status poll interval in seconds (10–600) |
 | `DETAILS_INTERVAL` | `300` | line details interval in seconds (60–3600) |
 | `SPEEDTEST_INTERVAL` | `0` | automatic speed test every N minutes (30–1440); 0 = off |
@@ -94,6 +93,16 @@ A device password is only valid for one router, so the router is identified by i
 - `ROUTER_PASSWORD` is assigned to the first router identified while no router is known yet.
 - A Speedport not seen before is new: the dashboard offers "Set up" (password optional) or "Ignore"; until then only status values (no login) are read.
 - Ignored routers are not monitored. Settings lists set-up and ignored routers; each can be switched or removed (removing deletes its password).
+
+## Dashboard password
+
+On first open the dashboard asks for a password or to keep it open; Settings → Dashboard password changes or removes it. With a password every page and API call requires HTTP basic auth (any user name). Until a choice is made the dashboard is open.
+
+- Stored as a salted scrypt hash in `/data/dashboard.json` (file mode 600).
+- Forgotten password: delete `dashboard.json` and restart the container; the next open asks again.
+- Whoever opens a new installation first chooses; set it right after installing.
+- HTTP basic auth over plain HTTP: the password crosses the network unencrypted. Use a reverse proxy with HTTPS beyond a trusted LAN.
+- `DASHBOARD_PASSWORD` / `DASHBOARD_PASSWORD_FILE` (up to 1.1.0) are ignored; a warning is logged while one is set.
 
 ## Polling and the router's single login
 

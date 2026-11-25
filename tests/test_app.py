@@ -108,6 +108,12 @@ def test_secrets_file_is_private(tmp_path: Path) -> None:
     assert store.password("SN-A") is None
 
 
+def test_unreadable_dashboard_access_does_not_open_the_dashboard(tmp_path: Path) -> None:
+    (tmp_path / "dashboard.json").write_text("{broken")
+    with pytest.raises(ValueError, match="delete it"):
+        Store(tmp_path, DEFAULTS).dashboard_access()
+
+
 def test_settings_override_defaults_and_survive_corruption(tmp_path: Path) -> None:
     store = Store(tmp_path, DEFAULTS)
     store.save_settings(Settings("https://192.168.2.1", 60, 600))

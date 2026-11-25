@@ -3,6 +3,7 @@
     settings.json   router address and poll intervals (UI changes override env defaults)
     routers.json    routers the user set up or ignored, by serial number
     secrets.json    device passwords by serial number (file mode 600)
+    dashboard.json  dashboard access chosen on first open (file mode 600)
 
 A device password is only valid for one router, so it is stored per serial number
 and only ever sent to the router reporting that serial number.
@@ -19,6 +20,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 _SECRET_FILE_MODE = 0o600
+_ACCESS_FILE = "dashboard.json"
 
 
 class Choice(StrEnum):
@@ -42,6 +44,15 @@ class Settings:
     details_interval: int
     speedtest_interval: int = 0
     """Minutes between automatic speed tests; 0 = off."""
+
+
+@dataclass(frozen=True)
+class StoredAccess:
+    """Dashboard access; without a password hash the dashboard is open."""
+    salt: str | None = None
+    """Hex."""
+    password_hash: str | None = None
+    """Hex, scrypt."""
 
 
 STATUS_INTERVAL_RANGE = range(10, 601)
@@ -99,6 +110,21 @@ class Store:
         secrets = self._read_json("secrets.json", {})
         if secrets.pop(serial_number, None) is not None:
             self._write_json("secrets.json", secrets, mode=_SECRET_FILE_MODE)
+
+    # Dashboard access
+
+    def dashboard_access(self) -> StoredAccess | None:
+        """None until chosen. An unreadable file raises instead of opening the dashboard."""
+        path = self._folder / _ACCESS_FILE
+        if not path.exists():
+            return None
+        try:
+            return StoredAccess(**json.loads(path.read_text(encoding="utf-8")))
+        except (ValueError, TypeError) as error:
+            raise ValueError(f"Unreadable {path}; delete it to choose the dashboard access again") from error
+
+    def save_dashboard_access(self, access: StoredAccess) -> None:
+        self._write_json(_ACCESS_FILE, asdict(access), mode=_SECRET_FILE_MODE)
 
     # Files
 

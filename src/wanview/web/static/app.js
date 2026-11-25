@@ -250,6 +250,7 @@ function renderNotices(state) {
   }
   for (const error of state.errors) add(error, "error");
 
+  show("access-setup", state.dashboardAccess === "unset");
   show("setup", state.router.new);
   document.getElementById("setup-name").textContent = `${state.router.model} (S/N ${state.router.serial})`;
   if (state.router.ignored) {
@@ -271,6 +272,10 @@ function renderSettings(state) {
   if (!editing("status-interval")) document.getElementById("status-interval").value = state.settings.statusInterval;
   if (!editing("details-interval")) document.getElementById("details-interval").value = state.settings.detailsInterval;
   if (!editing("speedtest-interval")) document.getElementById("speedtest-interval").value = state.settings.speedtestInterval;
+
+  document.getElementById("access-status").textContent =
+    state.dashboardAccess === "password" ? "Login required." : "Open: no login.";
+  document.getElementById("access-remove").disabled = state.dashboardAccess !== "password";
 
   const router = state.router;
   document.getElementById("password-router").textContent = router.serial
@@ -298,6 +303,36 @@ function renderSettings(state) {
       list.append(item);
     }
   }
+}
+
+// Dashboard access
+
+// Sets the dashboard password from a password and repeat field; null keeps the dashboard open.
+async function setDashboardAccess(passwordId, repeatId) {
+  let password = null;
+  if (passwordId) {
+    const field = document.getElementById(passwordId);
+    const repeat = document.getElementById(repeatId);
+    if (field.value !== repeat.value) {
+      alert("The passwords differ.");
+      return;
+    }
+    password = field.value;
+    field.value = "";
+    repeat.value = "";
+  }
+  const response = await fetch("/api/dashboard-access", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (!response.ok) {
+    alert(`Request failed (${response.status}).`);
+    return;
+  }
+  // The browser asks for the new password on reload.
+  if (password !== null) location.reload();
+  else await refreshState();
 }
 
 // API
@@ -357,6 +392,18 @@ function wireActions() {
   });
   document.getElementById("setup-ignore").addEventListener("click", () =>
     act(`/api/routers/${encodeURIComponent(current.router.serial)}`, "PUT", { choice: "ignored" }));
+  document.getElementById("access-setup-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    setDashboardAccess("access-setup-password", "access-setup-repeat");
+  });
+  document.getElementById("access-setup-open").addEventListener("click", () => setDashboardAccess(null));
+  document.getElementById("access-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    setDashboardAccess("access-password", "access-repeat");
+  });
+  document.getElementById("access-remove").addEventListener("click", () => {
+    if (confirm("Remove the dashboard password? Anyone on the network can then open the dashboard.")) setDashboardAccess(null);
+  });
   document.getElementById("settings-form").addEventListener("submit", (event) => {
     event.preventDefault();
     act("/api/settings", "PUT", {

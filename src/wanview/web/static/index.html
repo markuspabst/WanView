@@ -28,6 +28,17 @@
   <main>
     <section id="notices"></section>
 
+    <section id="access-setup" class="card notice" hidden>
+      <h2>Dashboard password</h2>
+      <p>Anyone on the network can open this dashboard, pause monitoring and restart the router. Set a password (any user name at login), or keep it open. Both can be changed in Settings.</p>
+      <form id="access-setup-form">
+        <input id="access-setup-password" type="password" autocomplete="new-password" placeholder="Password" required>
+        <input id="access-setup-repeat" type="password" autocomplete="new-password" placeholder="Repeat" required>
+        <button type="submit">Set password</button>
+        <button id="access-setup-open" type="button">Keep open</button>
+      </form>
+    </section>
+
     <section id="setup" class="card notice" hidden>
       <h2>New router: <span id="setup-name"></span></h2>
       <p>Set it up to monitor it (device password optional; without it only status values are read), or ignore it.</p>
@@ -105,6 +116,14 @@
         <input id="password" type="password" autocomplete="off" placeholder="Device password">
         <button type="submit">Save password</button>
         <button id="password-remove" type="button" class="danger">Remove password</button>
+      </form>
+      <h3>Dashboard password</h3>
+      <form id="access-form" class="settings">
+        <span id="access-status" class="muted"></span>
+        <input id="access-password" type="password" autocomplete="new-password" placeholder="New password" required>
+        <input id="access-repeat" type="password" autocomplete="new-password" placeholder="Repeat" required>
+        <button type="submit">Save password</button>
+        <button id="access-remove" type="button" class="danger">Remove password</button>
       </form>
       <h3>Set-up routers</h3>
       <ul id="routers-setUp" class="routers"></ul>

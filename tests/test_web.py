@@ -1,9 +1,12 @@
 from datetime import UTC, datetime, timedelta
+import os
+import stat
 from pathlib import Path
 
 from fakes import FakeRouter, FakeTester
 from fastapi.testclient import TestClient
 
+from wanview.app.access import DashboardAccess
 from wanview.app.data_log import DataLog
 from wanview.app.monitor import Monitor
 from wanview.app.store import Settings, Store
@@ -17,11 +20,11 @@ from wanview.web.server import create_app
 DEFAULTS = Settings(router_url="https://speedport.ip", status_interval=3600, details_interval=3600)
 
 
-def client(tmp_path: Path, router: FakeRouter, dashboard_password: str | None = None) -> TestClient:
+def client(tmp_path: Path, router: FakeRouter) -> TestClient:
     data_log = DataLog(tmp_path / "logs")
-    monitor = Monitor(Store(tmp_path, DEFAULTS), data_log, None, client_factory=router.client,
-                      speed_tester=FakeTester())
-    return TestClient(create_app(monitor, data_log, dashboard_password))
+    store = Store(tmp_path, DEFAULTS)
+    monitor = Monitor(store, data_log, None, client_factory=router.client, speed_tester=FakeTester())
+    return TestClient(create_app(monitor, data_log, DashboardAccess(store)))
 
 
 def test_saving_password_sets_up_router_and_reads_details(tmp_path: Path) -> None:
@@ -53,11 +56,47 @@ def test_settings_reject_bad_router_address(tmp_path: Path) -> None:
         assert api.put("/api/settings", json=body).status_code == 422
 
 
-def test_dashboard_password_is_enforced(tmp_path: Path) -> None:
-    with client(tmp_path, FakeRouter(), dashboard_password="letmein") as api:
+def test_dashboard_asks_for_access_choice_on_first_open(tmp_path: Path) -> None:
+    with client(tmp_path, FakeRouter()) as api:
+        assert api.get("/api/state").json()["dashboardAccess"] == "unset"
+        assert api.put("/api/dashboard-access", json={"password": None}).status_code == 204
+        assert api.get("/api/state").json()["dashboardAccess"] == "open"
+
+
+def test_dashboard_password_set_on_first_open_is_enforced(tmp_path: Path) -> None:
+    with client(tmp_path, FakeRouter()) as api:
+        assert api.put("/api/dashboard-access", json={"password": "letmein"}).status_code == 204
         assert api.get("/api/state").status_code == 401
         assert api.get("/", auth=("any", "wrong")).status_code == 401
+        state = api.get("/api/state", auth=("any", "letmein")).json()
+        assert state["dashboardAccess"] == "password"
+
+
+def test_dashboard_password_survives_restart_and_is_stored_hashed(tmp_path: Path) -> None:
+    with client(tmp_path, FakeRouter()) as api:
+        api.put("/api/dashboard-access", json={"password": "letmein"})
+    stored = tmp_path / "dashboard.json"
+    assert "letmein" not in stored.read_text()
+    assert stat.S_IMODE(os.stat(stored).st_mode) == 0o600
+    with client(tmp_path, FakeRouter()) as api:
+        assert api.get("/api/state").status_code == 401
         assert api.get("/api/state", auth=("any", "letmein")).status_code == 200
+
+
+def test_dashboard_password_change_needs_current_login(tmp_path: Path) -> None:
+    with client(tmp_path, FakeRouter()) as api:
+        api.put("/api/dashboard-access", json={"password": "old"})
+        assert api.put("/api/dashboard-access", json={"password": "new"}).status_code == 401
+        assert api.put("/api/dashboard-access", json={"password": "new"}, auth=("any", "old")).status_code == 204
+        assert api.get("/api/state", auth=("any", "old")).status_code == 401
+        assert api.put("/api/dashboard-access", json={"password": None}, auth=("any", "new")).status_code == 204
+        assert api.get("/api/state").status_code == 200
+
+
+def test_dashboard_password_must_not_be_empty(tmp_path: Path) -> None:
+    with client(tmp_path, FakeRouter()) as api:
+        assert api.put("/api/dashboard-access", json={"password": ""}).status_code == 422
+        assert api.get("/api/state").json()["dashboardAccess"] == "unset"
 
 
 def test_dashboard_files_are_revalidated_on_every_load(tmp_path: Path) -> None:

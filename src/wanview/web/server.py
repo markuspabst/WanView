@@ -10,14 +10,14 @@
     PUT  /api/routers/{serial}   {"choice": "setUp" | "ignored"}
     DELETE /api/routers/{serial}
     PUT  /api/settings           {"routerUrl", "statusInterval", "detailsInterval", "speedtestInterval"}
+    PUT  /api/dashboard-access   {"password": "…"} requires it from now on; {"password": null}: open
 
 Endpoints are async: the monitor must only be used from the event loop.
 
-If a dashboard password is configured, every route requires HTTP basic auth
-(any user name). Without one the dashboard is open: meant for a trusted LAN.
+With a dashboard password (set on first open or in Settings), every route requires
+HTTP basic auth (any user name). Otherwise the dashboard is open: meant for a trusted LAN.
 """
 
-import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -30,6 +30,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from wanview.app.access import DashboardAccess
 from wanview.app.data_log import DataLog
 from wanview.app.monitor import Monitor
 from wanview.app.store import (
@@ -60,6 +61,11 @@ class PasswordBody(BaseModel):
     password: str = Field(min_length=1, max_length=_MAX_PASSWORD_LENGTH)
 
 
+class DashboardAccessBody(BaseModel):
+    password: str | None = Field(min_length=1, max_length=_MAX_PASSWORD_LENGTH)
+    """None: no login."""
+
+
 class ChoiceBody(BaseModel):
     choice: Choice
 
@@ -72,14 +78,11 @@ class SettingsBody(BaseModel):
     """Minutes; 0 = off."""
 
 
-def create_app(monitor: Monitor, data_log: DataLog, dashboard_password: str | None) -> FastAPI:
+def create_app(monitor: Monitor, data_log: DataLog, access: DashboardAccess) -> FastAPI:
     basic = HTTPBasic(auto_error=False)
 
     def authorize(credentials: Annotated[HTTPBasicCredentials | None, Depends(basic)]) -> None:
-        if not dashboard_password:
-            return
-        given = credentials.password.encode() if credentials else b""
-        if not secrets.compare_digest(given, dashboard_password.encode()):
+        if not access.allows(credentials.password if credentials else None):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Login required",
                                 headers={"WWW-Authenticate": 'Basic realm="WanView"'})
 
@@ -101,7 +104,7 @@ def create_app(monitor: Monitor, data_log: DataLog, dashboard_password: str | No
     async def get_state() -> dict:
         # An open dashboard polls this; live LAN traffic runs only meanwhile.
         monitor.keep_traffic_alive()
-        return state(monitor)
+        return {**state(monitor), "dashboardAccess": access.mode}
 
     @app.get("/api/history")
     async def get_history(range_name: Annotated[str, Query(alias="range", pattern="^(day|week|month)$")] = "day") -> dict:
@@ -145,6 +148,13 @@ def create_app(monitor: Monitor, data_log: DataLog, dashboard_password: str | No
     @app.delete("/api/routers/{serial}", status_code=status.HTTP_204_NO_CONTENT)
     async def remove_router(serial: str) -> None:
         monitor.remove_router(serial)
+
+    @app.put("/api/dashboard-access", status_code=status.HTTP_204_NO_CONTENT)
+    async def set_dashboard_access(body: DashboardAccessBody) -> None:
+        if body.password is None:
+            access.set_open()
+        else:
+            access.set_password(body.password)
 
     @app.put("/api/settings", status_code=status.HTTP_204_NO_CONTENT)
     async def update_settings(body: SettingsBody) -> None:

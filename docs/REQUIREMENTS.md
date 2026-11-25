@@ -13,7 +13,7 @@ Verification: *test* = automated test in `tests/` (`pytest`); *manual* = checked
 | UR-03 | Every poll is logged constantly. | Status, line details, overflow and speed tests are appended to daily CSV files in the Linkbar format. | test (`test_data_log_*`, CSV round trips); manual: 1,633 Linkbar rows re-serialized byte-identically | met |
 | UR-04 | Stats are shown in a web view. | Dashboard at `http://<host>:8080` with current values and history. | manual | met |
 | UR-05 | The web view refreshes automatically. | Current values every 5 s, history every 30 s while visible, no reload needed. | manual | met |
-| UR-06 | Optional protection of the dashboard. | With `DASHBOARD_PASSWORD` set, every route requires it; without, the dashboard is open. | test (`test_dashboard_password_is_enforced`) | met |
+| UR-06 | Optional protection of the dashboard; the password is defined on first open. | First open asks for a password or "Keep open"; with a password every route requires it, stored hashed, changeable and removable in Settings. | test (`test_dashboard_asks_for_access_choice_on_first_open`, `test_dashboard_password_*`); API and dashboard flows scripted (jsdom) against the running app; the browser's login prompt after setting the password not checked in a real browser | partly |
 
 ## Router identity and passwords
 
