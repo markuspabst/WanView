@@ -49,18 +49,7 @@ docker compose up -d          # update: docker compose pull && docker compose up
 
 ### Synology (Container Manager)
 
-Needs DSM 7.2+ with Container Manager (DSM 7.0/7.1: "Docker" package) on an x86-64 or 64-bit ARM model, in the Speedport's network. On the first Synology install, the permission and DNS steps below were needed.
-
-1. File Station: create `docker/wanview/data` (on the host: `/volume1/docker/wanview/data`).
-2. Give the container (uid 1000) write access to `data`, one of:
-   - Without SSH: Control Panel → Task Scheduler → Create → Triggered Task → User-defined script, user `root`, event Boot-up, not enabled; command `chown -R 1000:1000 /volume1/docker/wanview/data`. Select the task, Run, then delete it.
-   - SSH: `sudo chown -R 1000:1000 /volume1/docker/wanview/data`.
-   - Run the container as your NAS user instead: uncomment `user:` in the compose file with its IDs (SSH: `id <user>`, often `1026:100`).
-3. Find the router's IP: Control Panel → Network → Network Interface → LAN → Edit, default gateway (Speedport default `192.168.2.1`). Docker on DSM usually cannot resolve `speedport.ip`.
-4. Container Manager → Project → Create: name `wanview`, path `docker/wanview`, source "Create docker-compose.yml", paste this repository's `docker-compose.yml` and set `ROUTER_URL` to `https://<router IP>`. Skip the Web Station portal; Done pulls the image and starts it.
-5. Open `http://<NAS IP>:8080` right away and choose the dashboard password (whoever opens it first chooses). Then set up the router with its device password.
-
-Logs: Container Manager → Container → `wanview` → Log. Update: Project → `wanview` → Action → Build (pulls the image of the configured tag). For the speed test's wired/Wi-Fi detection, uncomment `network_mode: host` (port 8080 must then be free on the NAS).
+Step-by-step guide: [docs/SYNOLOGY.md](docs/SYNOLOGY.md). In short: create `docker/wanview/data`, make it writable for uid 1000 (`chown -R 1000:1000`, e.g. via Task Scheduler as root), create a Container Manager project from `docker-compose.yml` with `ROUTER_URL` set to the router's IP address (Docker on DSM usually cannot resolve `speedport.ip`), then open the dashboard right away and choose the dashboard password.
 
 ### Troubleshooting
 
