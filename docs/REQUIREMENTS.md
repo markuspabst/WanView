@@ -64,3 +64,9 @@ Verification: *test* = automated test in `tests/` (`pytest`); *manual* = checked
 | UR-54 | The jump when 5G joins during a speed test is measurable. | Total and 5G rate over time per phase from repeated receiver port readings; the second 5G joined is shown; logged per test. | test (`test_phase_trace_shows_when_5g_joins`, `test_speed_test_logs_rates_over_time`, `test_state_includes_last_speed_test_trace`); real tester against a local server; charts scripted (jsdom); not yet run against the router | partly |
 | UR-52 | Speed test in its own tab. | Tab with Run, last result and download/upload and latency charts. | manual | met |
 | UR-53 | A speed test run from a host on Wi-Fi is marked. | Result marked Wi-Fi ("limits the result"); in history Wi-Fi tests get their own panel in their own colours (only when present) and Wi-Fi-coloured latency points; from the host's interface (Linux, macOS) or the router's LAN port counters. | test (`test_speed_test_tells_wired_from_wifi`, `tests/test_host_network.py`); host check live on macOS (USB LAN adapter: wired); a Wi-Fi run of the full speed test with the macOS check is pending | partly |
+
+## DNS test
+
+| ID | Requirement | Acceptance | Verification | Status |
+|---|---|---|---|---|
+| UR-60 | DNS test page with configurable DNS server addresses. | DNS tab: answer time or failure per server and test name; servers (IP or "router"), names and an optional interval editable and stored per router; results logged and charted per server. | test (`tests/test_dnstest.py` against a local stub server, `test_dns_*`, `test_saving_main_settings_keeps_dns_settings`); real queries to 1.1.1.1 and 9.9.9.9; tab scripted (jsdom); not yet run against the router's DNS | partly |

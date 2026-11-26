@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from wanview.domain.line import DSLDetails
-from wanview.domain.quality import Quality, crc_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality
+from wanview.domain.quality import Quality, crc_quality, dns_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality
 from wanview.domain.samples import (
     ErrorRate,
     HostLink,
@@ -185,3 +185,9 @@ def test_speed_trace_round_trip() -> None:
     assert sample.csv_row == "2026-11-23T18:53:20Z,down,3.0,100000000,40000000"
     assert SpeedTraceSample.from_csv(sample.csv_row) == sample
     assert SpeedTraceSample.from_csv(SpeedTraceSample.CSV_HEADER) is None
+
+
+@pytest.mark.parametrize(("latency", "expected"), [
+    (20.0, Quality.EXCELLENT), (20.1, Quality.GOOD), (50.0, Quality.GOOD), (150.0, Quality.FAIR), (151.0, Quality.POOR)])
+def test_dns_bands(latency: float, expected: Quality) -> None:
+    assert dns_quality(latency) == expected

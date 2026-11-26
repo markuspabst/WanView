@@ -3,7 +3,9 @@
 import asyncio
 import json
 import time
+from datetime import UTC, datetime
 
+from wanview.domain.samples import DnsOutcome, DnsSample
 from wanview.speedport.engineer_page import EngineerPage
 from wanview.speedport.varlist import VarList
 from wanview.speedtest import Measurement
@@ -104,3 +106,15 @@ class FakeClient:
 
     async def reboot(self) -> None:
         pass
+
+
+class FakeDnsTester:
+    """Answers every query in 12.5 ms; records the server addresses it was asked."""
+
+    def __init__(self) -> None:
+        self.servers: list[str] = []
+
+    async def run(self, servers: list[str], hostnames: list[str]) -> list[DnsSample]:
+        self.servers = servers
+        now = datetime.now(UTC)
+        return [DnsSample(now, server, hostname, 12.5, DnsOutcome.OK) for server in servers for hostname in hostnames]

@@ -368,6 +368,42 @@ class SpeedTraceSample:
         return cls(time, Direction(fields[1]), TracePoint(offset, total, _int(fields[4])))
 
 
+class DnsOutcome(StrEnum):
+    OK = "ok"
+    NXDOMAIN = "nxdomain"
+    """The server says the name does not exist."""
+    TIMEOUT = "timeout"
+    ERROR = "error"
+    """Any other failure: refused, server failure, unreachable, unresolvable server name."""
+
+
+@dataclass(frozen=True)
+class DnsSample:
+    """One DNS query of a test run: `server` as configured (an IP address or "router")."""
+
+    time: datetime
+    server: str
+    hostname: str
+    latency_ms: float | None
+    outcome: DnsOutcome
+
+    CSV_HEADER = "time,server,hostname,latency_ms,outcome"
+    _FIELD_COUNT = 5
+
+    @property
+    def csv_row(self) -> str:
+        latency = round(self.latency_ms, 1) if self.latency_ms is not None else None
+        return _row([_time(self.time), self.server, self.hostname, latency, self.outcome.value])
+
+    @classmethod
+    def from_csv(cls, row: str) -> "DnsSample | None":
+        fields = _fields(row, cls._FIELD_COUNT)
+        time = _parse_time(fields[0]) if fields else None
+        if fields is None or time is None or fields[4] not in DnsOutcome._value2member_map_:
+            return None
+        return cls(time, fields[1], fields[2], _float(fields[3]), DnsOutcome(fields[4]))
+
+
 class EventKind(StrEnum):
     """Values that are not measurements but whose changes matter: reconnects, firmware
     updates, DSL retrains, receiver restarts, cell handovers."""

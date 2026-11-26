@@ -136,6 +136,10 @@ With a set-up router and a 5G receiver, the receiver port's byte counters are re
 
 Wi-Fi results show "limits the result". In the history, Wi-Fi tests have their own "Download / upload over Wi-Fi" panel in violet/pink (shown only when the range contains any), the main chart shows the other tests, and the latency chart draws Wi-Fi tests in violet.
 
+## DNS test
+
+The DNS tab asks each configured DNS server directly (UDP, one A query per test name, 2 s timeout, no retries, no cache) and shows the answer time per server and name, or why it failed (timeout, not found, error). Defaults: the router itself (`router`: the address from the router URL, resolved once if it is a name), Cloudflare `1.1.1.1`, Google `8.8.8.8`, Quad9 `9.9.9.9`; test names `telekom.de`, `google.com`, `cloudflare.com`. Up to 8 servers (IPv4 or IPv6 addresses) and 8 names, editable on the tab and stored per router. "Run" tests now; "Test every (min)" runs it automatically (5–1440, 0 = off, the default). Results: `<date>-dns.csv` (`time,server,hostname,latency_ms,outcome`) and a chart per server (median and slowest answer per run, failures counted). Queries use `dnspython`, because the standard library cannot ask a specific server.
+
 ## Dashboard
 
 Header: DSL sync rate and the receiver signal as bars (1–4, the RSRP rating; "4G" without 5G signal; dBm in the tooltip). Tabs: Overview (connection, DSL, hybrid bonding, 5G receiver, LAN traffic live), DSL (history), 5G/LTE (history; only while a receiver is reported), Speed test (run, last result, history), Settings. Hybrid bonding and 5G receiver are hidden when no receiver is reported (`ex5g_model_name` empty); LAN1 is then listed under LAN traffic. History for 24 hours, 7 or 30 days; with less logged data (e.g. a new install) the time axis starts at the first value, and a chart without values shows "No data available". DSL tab: sync rate (normal rate dashed, offline periods red), SNR margin, attainable rate (line capacity), CRC and FEC errors per hour, attenuation, internet rate, and connection/DSL events (reconnects, firmware, DSL mode and state). Speed test tab: download/upload and latency per test, and the DSL/5G split per test when measured. 5G/LTE tab: receiver signal (RSRP), signal quality (RSRQ), hybrid bonding (5G overflow per details poll, current DSL limit in the header, periods with a bonding leg down shaded red), DSL overflow limit, and receiver events (state, 5G/LTE cell and band changes); each chart can be collapsed (remembered per browser).
@@ -149,12 +153,13 @@ Indicators (dot; poor is a red triangle). Rules of thumb, not standards:
 | DSL SNR margin | ≥ 12 dB | ≥ 10 dB | ≥ 6 dB | below |
 | DSL CRC errors, increase per hour | 0 | ≤ 60 | ≤ 600 | above |
 | DSL sync, share of the normal rate | ≥ 99 % | ≥ 95 % | ≥ 85 % | below |
+| DNS answer time | ≤ 20 ms | ≤ 50 ms | ≤ 150 ms | above, or no answer |
 
 The normal sync rate is the median of the last 7 days of logged status polls (per direction, recomputed hourly, at least 100 readings; sync 0 is left out); a rating below excellent is also flagged in the header. The receiver cell shows the worse of RSRP and RSRQ. Internet, DSL link and receiver state are up (online/running) or poor.
 
 ## Logs
 
-`/data/routers/<serial>/logs/<date>-status.csv`, `<date>-line.csv`, `<date>-overflow.csv`, one file per UTC day and kind, timestamps in UTC, not pruned (about 300 KB per day). Also `<date>-speedtest.csv` (see Speed test) and `<date>-events.csv` (`time,kind,value`): the first value seen and every change of `online_since` (reconnect), `firmware`, `dsl_mode`, `dsl_state`, `receiver_state`, `nr_cell`, `lte_cell` (physical cell IDs). 5G/LTE band changes come from the status log. LAN traffic per port is live only: logging it continuously would hold the router's single login.
+`/data/routers/<serial>/logs/<date>-status.csv`, `<date>-line.csv`, `<date>-overflow.csv`, one file per UTC day and kind, timestamps in UTC, not pruned (about 300 KB per day). Also `<date>-speedtest.csv`, `<date>-speedtrace.csv` (see Speed test), `<date>-dns.csv` (see DNS test) and `<date>-events.csv` (`time,kind,value`): the first value seen and every change of `online_since` (reconnect), `firmware`, `dsl_mode`, `dsl_state`, `receiver_state`, `nr_cell`, `lte_cell` (physical cell IDs). 5G/LTE band changes come from the status log. LAN traffic per port is live only: logging it continuously would hold the router's single login.
 
 5G overflow: average 5G rate between details polls from the receiver port's byte counters (`interfaces_hidden_lan.stm`, LAN1, `inte_face_rx/tx[0][1]`); after a container restart the last logged poll (at most three intervals old) is the reference. A counter that goes backwards (router reboot) gives no value.
 

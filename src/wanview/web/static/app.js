@@ -8,8 +8,8 @@ const WHOLE_MEGABIT_THRESHOLD = 10;
 
 let current = null;
 let historyRange = "day";
-const TABS = ["overview", "dsl", "mobile", "speedtest", "settings"];
-const HISTORY_TABS = ["dsl", "mobile", "speedtest"];
+const TABS = ["overview", "dsl", "mobile", "speedtest", "dns", "settings"];
+const HISTORY_TABS = ["dsl", "mobile", "speedtest", "dns"];
 // Old bookmarks (#history) lead to the DSL tab.
 const TAB_ALIASES = { history: "dsl" };
 let activeTab = "overview";
@@ -171,6 +171,73 @@ function renderSpeedtest(state) {
   }
   rows("card-speedtest", entries, "No test yet.");
   renderSpeedtrace(t);
+}
+
+// DNS test: answer time per server and name; failures say why.
+const DNS_OUTCOME_TEXT = { nxdomain: "not found", timeout: "timeout", error: "error" };
+
+function renderDns(state) {
+  const d = state.dns;
+  const button = document.getElementById("run-dns");
+  button.disabled = d.running || state.paused;
+  button.textContent = d.running ? "Running…" : "Run";
+  document.getElementById("dns-time").textContent = d.time
+    ? `Measured ${new Date(d.time).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}` : "No test yet.";
+
+  const servers = [...new Set(d.results.map((r) => r.server))];
+  const names = [...new Set(d.results.map((r) => r.hostname))];
+  const table = document.getElementById("dns-results");
+  table.replaceChildren();
+  if (servers.length) {
+    const head = element("tr");
+    head.append(element("th"), ...servers.map((s) => element("th", {}, s)));
+    table.append(head);
+  }
+  for (const name of names) {
+    const row = element("tr");
+    row.append(element("th", {}, name));
+    for (const server of servers) {
+      const r = d.results.find((x) => x.server === server && x.hostname === name);
+      const cell = element("td");
+      if (r) {
+        const mark = r.rating === "poor" ? element("span", { class: "triangle", title: r.rating }, "▲")
+                                         : element("span", { class: `dot ${r.rating}`, title: r.rating });
+        cell.append(mark, r.outcome === "ok" ? ` ${Math.round(r.latencyMs)} ms` : ` ${DNS_OUTCOME_TEXT[r.outcome]}`);
+      }
+      row.append(cell);
+    }
+    table.append(row);
+  }
+
+  const form = document.getElementById("dns-form");
+  if (!form.contains(document.activeElement)) {
+    document.getElementById("dns-servers").value = d.servers.join("\n");
+    document.getElementById("dns-hostnames").value = d.hostnames.join("\n");
+    document.getElementById("dns-interval").value = d.interval;
+  }
+}
+
+// Per server and test run: median and slowest answer of the test names; failures are counted.
+function dnsCharts(rows, servers, start, end) {
+  const order = [...new Set([...servers, ...rows.map((r) => r[1])])];
+  if (order.length === 0) return [chart("DNS answer time", "ms", ["median", "slowest"], [], start, end, Infinity)];
+  return order.map((server) => {
+    const runs = new Map();
+    let failed = 0;
+    for (const [time, s, , latency, outcome] of rows) {
+      if (s !== server) continue;
+      if (!runs.has(time)) runs.set(time, []);
+      if (outcome === "ok" && latency !== null) runs.get(time).push(latency);
+      else failed += 1;
+    }
+    const points = [...runs].map(([time, latencies]) => {
+      const sorted = latencies.sort((a, b) => a - b);
+      const median = sorted.length ? sorted[Math.floor((sorted.length - 1) / 2)] : null;
+      return { time: Date.parse(time), values: [median, sorted.length ? sorted[sorted.length - 1] : null] };
+    });
+    return chart(`DNS ${server}`, "ms", ["median", "slowest"], points, start, end, Infinity,
+                 { dots: true, note: failed ? `${failed} unanswered or failed queries` : null });
+  });
 }
 
 // Rates over time during the last test: with hybrid bonding 5G joins once DSL is full,
@@ -396,6 +463,7 @@ async function refreshState() {
   renderReceiver(current);
   renderTraffic(current);
   renderSpeedtest(current);
+  renderDns(current);
   renderSettings(current);
 }
 
@@ -431,6 +499,16 @@ function wireActions() {
   });
   document.getElementById("access-remove").addEventListener("click", () => {
     if (confirm("Remove the dashboard password? Anyone on the network can then open the dashboard.")) setDashboardAccess(null);
+  });
+  document.getElementById("run-dns").addEventListener("click", () => act("/api/dnstest"));
+  document.getElementById("dns-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const lines = (id) => document.getElementById(id).value.split(/\s+/).filter(Boolean);
+    act("/api/dns", "PUT", {
+      servers: lines("dns-servers"), hostnames: lines("dns-hostnames"),
+      interval: Number(document.getElementById("dns-interval").value),
+    });
+    document.activeElement.blur();
   });
   document.getElementById("settings-form").addEventListener("submit", (event) => {
     event.preventDefault();
@@ -673,7 +751,7 @@ async function refreshHistory() {
   const end = Date.parse(h.now);
   // Less logged than the range (e.g. a new install): all charts start at the first value
   // instead of showing mostly empty space. Rows are in time order.
-  const firstTimes = [h.status, h.line, h.crc, h.overflow, h.speedtest]
+  const firstTimes = [h.status, h.line, h.crc, h.overflow, h.speedtest, h.dns]
     .filter((rows) => rows.length).map((rows) => Date.parse(rows[0][0]));
   const start = firstTimes.length
     ? Math.max(Date.parse(h.since), Math.min(end - MIN_AXIS_SPAN_MS, ...firstTimes))
@@ -735,6 +813,7 @@ async function refreshHistory() {
                       start, end, Infinity, { dots: true }));
   }
   document.getElementById("charts-speedtest").replaceChildren(...panels);
+  document.getElementById("charts-dns").replaceChildren(...dnsCharts(h.dns, current ? current.dns.servers : [], start, end));
   document.getElementById("charts-mobile").replaceChildren(
     chart("Receiver signal (RSRP)", "dBm", ["5G", "LTE"], series(h.status, (r) => [r[3], r[4]]), start, end, statusGap),
     chart("Signal quality (RSRQ)", "dB", ["5G", "LTE"], series(h.line, (r) => [r[5], r[6]]), start, end, detailsGap,

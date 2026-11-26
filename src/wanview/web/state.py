@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 from wanview.app.data_log import DataLog
 from wanview.app.monitor import Monitor
 from wanview.domain.line import Cell
-from wanview.domain.samples import ErrorRate, NormalSync, StatusSample
-from wanview.domain.quality import Quality, crc_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality, worst
+from wanview.domain.samples import DnsOutcome, ErrorRate, NormalSync, StatusSample
+from wanview.domain.quality import Quality, crc_quality, dns_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality, worst
 from wanview.domain.traffic import Direction, HybridTrafficRate, mobile_onset
 
 _KBIT = 1000
@@ -61,6 +61,7 @@ def state(monitor: Monitor) -> dict:
                      "detailsInterval": monitor.settings.details_interval,
                      "speedtestInterval": monitor.settings.speedtest_interval},
         "speedtest": _speedtest(monitor),
+        "dns": _dns(monitor),
         "routers": [{"serial": router.serial_number, "name": router.name, "added": router.added,
                      "choice": router.choice.value, "connected": router.serial_number == monitor.serial}
                     for router in monitor.routers],
@@ -161,6 +162,19 @@ def _speedtest(monitor: Monitor) -> dict:
     }
 
 
+def _dns(monitor: Monitor) -> dict:
+    settings = monitor.settings
+    last = monitor.last_dns
+    return {
+        "running": monitor.dns_running,
+        "servers": list(settings.dns_servers), "hostnames": list(settings.dns_hostnames), "interval": settings.dns_interval,
+        "time": _iso(last[0].time) if last else None,
+        "results": [{"server": s.server, "hostname": s.hostname, "latencyMs": s.latency_ms, "outcome": s.outcome.value,
+                     "rating": _rating(dns_quality(s.latency_ms) if s.outcome == DnsOutcome.OK and s.latency_ms is not None
+                                       else Quality.POOR)} for s in last],
+    }
+
+
 def _speedtrace(monitor: Monitor) -> dict:
     """Rates over time of the last test per direction: [seconds from phase start, total, 5G]."""
     result: dict = {}
@@ -224,6 +238,9 @@ def history(data_log: DataLog | None, range_name: str, normal_sync: NormalSync) 
                       for s in (data_log.speedtest_samples(since) if data_log else [])],
         # [time, kind, new value] in time order: logged events and 5G/LTE band changes
         "events": sorted(events),
+        # [time, server, hostname, latency ms (None if unanswered), outcome]
+        "dns": [[_iso(s.time), s.server, s.hostname, s.latency_ms, s.outcome.value]
+                for s in (data_log.dns_samples(since) if data_log else [])],
     }
 
 

@@ -11,6 +11,8 @@
     DELETE /api/routers/{serial}
     PUT  /api/settings           {"routerUrl", "statusInterval", "detailsInterval", "speedtestInterval"}
     PUT  /api/dashboard-access   {"password": "…"} requires it from now on; {"password": null}: open
+    PUT  /api/dns                {"servers": [IP | "router"], "hostnames": [...], "interval": minutes, 0 = off}
+    POST /api/dnstest            starts a DNS test (409 while one runs, paused or no router identified)
 
 Endpoints are async: the monitor must only be used from the event loop.
 
@@ -18,8 +20,11 @@ With a dashboard password (set on first open or in Settings), every route requir
 HTTP basic auth (any user name). Otherwise the dashboard is open: meant for a trusted LAN.
 """
 
+import ipaddress
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -34,17 +39,23 @@ from wanview.app.access import DashboardAccess
 from wanview.app.monitor import Monitor
 from wanview.app.store import (
     DETAILS_INTERVAL_RANGE,
+    DNS_INTERVAL_RANGE,
+    DNS_TEST_OFF,
+    ROUTER_DNS,
     SPEEDTEST_INTERVAL_RANGE,
     SPEEDTEST_OFF,
     STATUS_INTERVAL_RANGE,
     Choice,
-    Settings,
 )
 from wanview.web.state import history, state
 
 _STATIC = Path(__file__).parent / "static"
 _ALLOWED_SCHEMES = ("https", "http")
 _MAX_PASSWORD_LENGTH = 256
+_MAX_DNS_ENTRIES = 8
+_MAX_HOSTNAME_LENGTH = 253
+# RFC 1123 host names: dot-separated labels of letters, digits and inner hyphens.
+_HOSTNAME = re.compile(r"(?=.{1,253}$)([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?")
 # Browsers revalidate dashboard files (ETag) on every load, so updates apply at once.
 _NO_CACHE = {"Cache-Control": "no-cache"}
 
@@ -63,6 +74,21 @@ class PasswordBody(BaseModel):
 class DashboardAccessBody(BaseModel):
     password: str | None = Field(min_length=1, max_length=_MAX_PASSWORD_LENGTH)
     """None: no login."""
+
+
+class DnsBody(BaseModel):
+    servers: list[str] = Field(min_length=1, max_length=_MAX_DNS_ENTRIES)
+    hostnames: list[str] = Field(min_length=1, max_length=_MAX_DNS_ENTRIES)
+    interval: int = DNS_TEST_OFF
+    """Minutes; 0 = off."""
+
+
+def _is_ip(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return True
 
 
 class ChoiceBody(BaseModel):
@@ -155,6 +181,23 @@ def create_app(monitor: Monitor, access: DashboardAccess) -> FastAPI:
         else:
             access.set_password(body.password)
 
+    @app.put("/api/dns", status_code=status.HTTP_204_NO_CONTENT)
+    async def update_dns(body: DnsBody) -> None:
+        if not all(server == ROUTER_DNS or _is_ip(server) for server in body.servers):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, 'DNS servers: IP addresses or "router".')
+        if not all(len(name) <= _MAX_HOSTNAME_LENGTH and _HOSTNAME.fullmatch(name) for name in body.hostnames):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Test names must be host names like telekom.de.")
+        if body.interval != DNS_TEST_OFF and body.interval not in DNS_INTERVAL_RANGE:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "DNS test interval: 0 (off) or 5–1440 minutes.")
+        monitor.update_settings(replace(monitor.settings, dns_servers=tuple(body.servers),
+                                        dns_hostnames=tuple(body.hostnames), dns_interval=body.interval))
+
+    @app.post("/api/dnstest", status_code=status.HTTP_202_ACCEPTED)
+    async def start_dnstest() -> None:
+        if not monitor.start_dns_test():
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "A DNS test is running, monitoring is paused, or no router is identified yet.")
+
     @app.put("/api/settings", status_code=status.HTTP_204_NO_CONTENT)
     async def update_settings(body: SettingsBody) -> None:
         parts = urlsplit(body.routerUrl)
@@ -162,7 +205,9 @@ def create_app(monitor: Monitor, access: DashboardAccess) -> FastAPI:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Router address must be like https://speedport.ip")
         if body.speedtestInterval != SPEEDTEST_OFF and body.speedtestInterval not in SPEEDTEST_INTERVAL_RANGE:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Speed test interval: 0 (off) or 30–1440 minutes.")
-        monitor.update_settings(Settings(f"{parts.scheme}://{parts.netloc}", body.statusInterval, body.detailsInterval,
-                                         body.speedtestInterval))
+        # replace(): the DNS settings are saved separately and stay as they are.
+        monitor.update_settings(replace(monitor.settings, router_url=f"{parts.scheme}://{parts.netloc}",
+                                        status_interval=body.statusInterval, details_interval=body.detailsInterval,
+                                        speedtest_interval=body.speedtestInterval))
 
     return app

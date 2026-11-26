@@ -7,12 +7,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from fakes import TRACE_PHASE_SECONDS, FakeRouter, FakeTester
+from fakes import TRACE_PHASE_SECONDS, FakeDnsTester, FakeRouter, FakeTester
 import httpx
 
 from wanview.app.data_log import DataLog
 from wanview.app.monitor import Monitor
-from wanview.app.store import Choice, Settings, Store
+from wanview.app.store import ROUTER_DNS, Choice, Settings, Store
 from wanview.domain.samples import EventKind, HostLink, StatusSample
 from wanview.domain.traffic import Direction
 from wanview.host_network import InterfaceKind
@@ -43,12 +43,13 @@ async def settle() -> None:
 
 async def started(tmp_path: Path, router: FakeRouter, initial_password: str | None = None,
                   store: Store | None = None, tester: FakeTester | None = None,
-                  host_kind: InterfaceKind | None = None) -> Monitor:
+                  host_kind: InterfaceKind | None = None, dns_tester: FakeDnsTester | None = None) -> Monitor:
     store = store or Store(tmp_path, DEFAULTS)
     tester = tester or FakeTester()
     tester.router = router
     monitor = Monitor(store, initial_password, client_factory=router.client,
-                      speed_tester=tester, host_interface_kind=lambda: host_kind)
+                      speed_tester=tester, host_interface_kind=lambda: host_kind,
+                      dns_tester=dns_tester or FakeDnsTester())
     monitor.start()
     await settle()
     return monitor
@@ -279,6 +280,29 @@ async def test_speed_test_logs_rates_over_time(tmp_path: Path) -> None:
     assert all(point.point.mobile_bps is not None for point in trace)
     logged = router_log(tmp_path).speedtrace_samples(monitor.last_speedtest.time - timedelta(seconds=1))
     assert len(logged) == len(trace)
+
+
+async def test_dns_test_queries_the_router_and_logs_results(tmp_path: Path) -> None:
+    store = Store(tmp_path, replace(DEFAULTS, router_url="https://192.168.2.1"))
+    dns = FakeDnsTester()
+    monitor = await started(tmp_path, FakeRouter(), store=store, dns_tester=dns)
+    monitor.update_settings(replace(monitor.settings, dns_servers=(ROUTER_DNS, "1.1.1.1"), dns_hostnames=("telekom.de",)))
+    await settle()
+    assert monitor.start_dns_test()
+    await settle()
+    await monitor.stop()
+
+    assert dns.servers == ["192.168.2.1", "1.1.1.1"]
+    assert [(s.server, s.hostname, s.latency_ms) for s in monitor.last_dns] == [
+        (ROUTER_DNS, "telekom.de", 12.5), ("1.1.1.1", "telekom.de", 12.5)]
+    assert len(router_log(tmp_path).dns_samples(datetime.now(UTC) - timedelta(minutes=1))) == 2
+    assert Store(tmp_path, DEFAULTS).settings("SN-A").dns_servers == (ROUTER_DNS, "1.1.1.1")
+
+
+async def test_dns_test_needs_an_identified_router(tmp_path: Path) -> None:
+    monitor = await started(tmp_path, FakeRouter(unreachable=httpx.ConnectError("offline")))
+    assert not monitor.start_dns_test()
+    await monitor.stop()
 
 
 async def test_speed_test_without_password_has_no_split(tmp_path: Path) -> None:

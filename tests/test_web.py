@@ -4,7 +4,7 @@ import stat
 import time
 from pathlib import Path
 
-from fakes import TRACE_PHASE_SECONDS, FakeRouter, FakeTester
+from fakes import TRACE_PHASE_SECONDS, FakeDnsTester, FakeRouter, FakeTester
 from fastapi.testclient import TestClient
 
 from wanview.app.access import DashboardAccess
@@ -25,7 +25,7 @@ def client(tmp_path: Path, router: FakeRouter) -> TestClient:
     store = Store(tmp_path, DEFAULTS)
     tester = FakeTester()
     tester.router = router
-    monitor = Monitor(store, None, client_factory=router.client, speed_tester=tester)
+    monitor = Monitor(store, None, client_factory=router.client, speed_tester=tester, dns_tester=FakeDnsTester())
     return TestClient(create_app(monitor, DashboardAccess(store)))
 
 
@@ -145,6 +145,40 @@ def test_state_includes_last_speed_test_trace(tmp_path: Path) -> None:
             time.sleep(TRACE_PHASE_SECONDS)
     assert set(trace) == {"down", "downOnset", "up", "upOnset"}
     assert all(len(point) == 3 for point in trace["down"])
+
+
+def test_dns_settings_are_validated_and_saved(tmp_path: Path) -> None:
+    good = {"servers": ["router", "1.1.1.1", "2606:4700:4700::1111"], "hostnames": ["telekom.de"], "interval": 30}
+    with client(tmp_path, FakeRouter()) as api:
+        for bad in ({**good, "servers": ["dns.example"]}, {**good, "servers": []},
+                    {**good, "hostnames": ["not a name"]}, {**good, "interval": 2}):
+            assert api.put("/api/dns", json=bad).status_code == 422, bad
+        assert api.put("/api/dns", json=good).status_code == 204
+        dns = api.get("/api/state").json()["dns"]
+    assert (dns["servers"], dns["hostnames"], dns["interval"]) == (good["servers"], good["hostnames"], 30)
+
+
+def test_saving_main_settings_keeps_dns_settings(tmp_path: Path) -> None:
+    with client(tmp_path, FakeRouter()) as api:
+        api.put("/api/dns", json={"servers": ["9.9.9.9"], "hostnames": ["telekom.de"], "interval": 60})
+        api.put("/api/settings", json={"routerUrl": "https://speedport.ip", "statusInterval": 30, "detailsInterval": 300})
+        dns = api.get("/api/state").json()["dns"]
+    assert (dns["servers"], dns["interval"]) == (["9.9.9.9"], 60)
+
+
+def test_dns_test_results_in_state_and_history(tmp_path: Path) -> None:
+    with client(tmp_path, FakeRouter()) as api:
+        api.put("/api/dns", json={"servers": ["1.1.1.1"], "hostnames": ["telekom.de"], "interval": 0})
+        assert api.post("/api/dnstest").status_code == 202
+        for _ in range(50):
+            results = api.get("/api/state").json()["dns"]["results"]
+            if results:
+                break
+            time.sleep(0.01)
+        history = api.get("/api/history?range=day").json()["dns"]
+    assert results == [{"server": "1.1.1.1", "hostname": "telekom.de", "latencyMs": 12.5, "outcome": "ok",
+                        "rating": "excellent"}]
+    assert [row[1:] for row in history] == [["1.1.1.1", "telekom.de", 12.5, "ok"]]
 
 
 def test_dashboard_files_are_revalidated_on_every_load(tmp_path: Path) -> None:

@@ -22,6 +22,7 @@
     <button type="button" role="tab" data-tab="dsl">DSL</button>
     <button type="button" role="tab" data-tab="mobile" id="tab-mobile" hidden>5G/LTE</button>
     <button type="button" role="tab" data-tab="speedtest">Speed test</button>
+    <button type="button" role="tab" data-tab="dns">DNS</button>
     <button type="button" role="tab" data-tab="settings">Settings</button>
   </div>
 
@@ -100,6 +101,36 @@
         </section>
         <div id="charts-speedtrace"></div>
         <div id="charts-speedtest"></div>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="dns">
+      <div class="panel-header">
+        <h2>DNS test</h2>
+        <span class="range">
+          <button type="button" data-range="day" class="selected">24 hours</button>
+          <button type="button" data-range="week">7 days</button>
+          <button type="button" data-range="month">30 days</button>
+        </span>
+      </div>
+      <div class="charts">
+        <section class="card" id="card-dns">
+          <h2>Last result <button id="run-dns" type="button" class="header-action">Run</button></h2>
+          <p id="dns-time" class="muted"></p>
+          <table id="dns-results" class="dns-results"></table>
+        </section>
+        <section class="card">
+          <h2>DNS servers and test names</h2>
+          <form id="dns-form" class="dns-form">
+            <label>Servers (IP addresses, "router" = the router itself), one per line
+              <textarea id="dns-servers" rows="4" required></textarea></label>
+            <label>Test names, one per line <textarea id="dns-hostnames" rows="3" required></textarea></label>
+            <label title="0 = off">Test every (min, 0 = off) <input id="dns-interval" type="number" min="0" max="1440" step="5" required></label>
+            <button type="submit">Save</button>
+          </form>
+          <p class="muted">Each server is asked directly (one A query per name, 2 s timeout, no cache), so its own answer time is measured.</p>
+        </section>
+        <div id="charts-dns"></div>
       </div>
     </section>
 

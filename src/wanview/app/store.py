@@ -34,7 +34,10 @@ _LOGS_FOLDER = "logs"
 _PLAIN_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _HASHED_NAME_LENGTH = 16
 # Settings that belong to a router; the address is needed to find one, so it is global.
-_ROUTER_SETTINGS = ("status_interval", "details_interval", "speedtest_interval")
+_ROUTER_SETTINGS = ("status_interval", "details_interval", "speedtest_interval", "dns_servers", "dns_hostnames",
+                    "dns_interval")
+# Stored as JSON lists.
+_TUPLE_SETTINGS = ("dns_servers", "dns_hostnames")
 
 
 class Choice(StrEnum):
@@ -51,6 +54,12 @@ class KnownRouter:
     choice: Choice
 
 
+# DNS server entry meaning the router itself (its address from the router URL).
+ROUTER_DNS = "router"
+DEFAULT_DNS_SERVERS = (ROUTER_DNS, "1.1.1.1", "8.8.8.8", "9.9.9.9")
+DEFAULT_DNS_HOSTNAMES = ("telekom.de", "google.com", "cloudflare.com")
+
+
 @dataclass(frozen=True)
 class Settings:
     router_url: str
@@ -58,6 +67,11 @@ class Settings:
     details_interval: int
     speedtest_interval: int = 0
     """Minutes between automatic speed tests; 0 = off."""
+    dns_servers: tuple[str, ...] = DEFAULT_DNS_SERVERS
+    """IP addresses or ROUTER_DNS."""
+    dns_hostnames: tuple[str, ...] = DEFAULT_DNS_HOSTNAMES
+    dns_interval: int = 0
+    """Minutes between automatic DNS tests; 0 = off."""
 
 
 @dataclass(frozen=True)
@@ -74,6 +88,8 @@ DETAILS_INTERVAL_RANGE = range(60, 3601)
 # Each test saturates the line for ~20 s, so automatic tests run at most every 30 min.
 SPEEDTEST_INTERVAL_RANGE = range(30, 1441)
 SPEEDTEST_OFF = 0
+DNS_INTERVAL_RANGE = range(5, 1441)
+DNS_TEST_OFF = 0
 
 
 class Store:
@@ -89,12 +105,17 @@ class Store:
         stored = self._read_json(_SETTINGS_FILE, {})
         if serial_number is not None:
             stored |= self._read_json(self._router_settings_path(serial_number), {})
-        return replace(self._defaults, **{key: value for key, value in stored.items()
-                                          if key in Settings.__dataclass_fields__})
+        values = {key: value for key, value in stored.items() if key in Settings.__dataclass_fields__}
+        for key in _TUPLE_SETTINGS:
+            if key in values:
+                values[key] = tuple(values[key])
+        return replace(self._defaults, **values)
 
     def save_settings(self, settings: Settings, serial_number: str | None = None) -> None:
         """The intervals go to the router's own settings when a router is given."""
         values = asdict(settings)
+        for key in _TUPLE_SETTINGS:
+            values[key] = list(values[key])
         if serial_number is None:
             self._write_json(_SETTINGS_FILE, values)
             return

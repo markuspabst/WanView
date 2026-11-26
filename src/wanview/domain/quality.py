@@ -24,6 +24,10 @@ _SYNC_FLOORS = (0.99, 0.95, 0.85)
 # Upper limits per hour: occasional CRC errors are normal, hundreds per hour are not.
 _CRC_GOOD_CEILING = 60.0
 _CRC_FAIR_CEILING = 600.0
+# DNS answer time in ms (judgement): a nearby resolver answers within tens of ms.
+_DNS_EXCELLENT_CEILING_MS = 20.0
+_DNS_GOOD_CEILING_MS = 50.0
+_DNS_FAIR_CEILING_MS = 150.0
 
 
 def _by_floors(value: float, floors: tuple[float, float, float]) -> Quality:
@@ -64,6 +68,17 @@ def crc_quality(errors_per_hour: float) -> Quality:
 def sync_quality(current_bps: int, normal_bps: int) -> Quality:
     """Current DSL sync rate against the line's normal rate (see `samples.NormalSync`)."""
     return _by_floors(current_bps / normal_bps, _SYNC_FLOORS)
+
+
+def dns_quality(latency_ms: float) -> Quality:
+    """For answered queries; a failed query is poor."""
+    if latency_ms <= _DNS_EXCELLENT_CEILING_MS:
+        return Quality.EXCELLENT
+    if latency_ms <= _DNS_GOOD_CEILING_MS:
+        return Quality.GOOD
+    if latency_ms <= _DNS_FAIR_CEILING_MS:
+        return Quality.FAIR
+    return Quality.POOR
 
 
 def worst(*qualities: Quality | None) -> Quality | None:

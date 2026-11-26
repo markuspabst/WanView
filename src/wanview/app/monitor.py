@@ -17,18 +17,23 @@ Thread-safety: use from one asyncio event loop only.
 
 import asyncio
 import contextlib
+import ipaddress
 import logging
+import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
 import httpx
 
 from wanview.app.data_log import DataLog
-from wanview.app.store import Choice, KnownRouter, Settings, Store
+from wanview.app.store import ROUTER_DNS, Choice, KnownRouter, Settings, Store
 from wanview.domain.line import DSL_PAGE, RECEIVER_PAGE, DSLDetails, ReceiverStatus
 from wanview.domain.samples import (
+    DnsOutcome,
+    DnsSample,
     ErrorRate,
     EventKind,
     EventSample,
@@ -57,6 +62,7 @@ from wanview.domain.traffic import (
 from wanview.speedport.client import REBOOT_SECONDS, SpeedportClient
 from wanview.speedport.errors import SpeedportError, connection_problem
 from wanview.host_network import InterfaceKind, default_interface_kind
+from wanview.dnstest import DnsTester
 from wanview.speedtest import RateLimited, SpeedTester
 
 log = logging.getLogger(__name__)
@@ -104,12 +110,14 @@ class Monitor:
     def __init__(self, store: Store, initial_password: str | None,
                  client_factory: Callable[[str, str | None], SpeedportClient] = SpeedportClient,
                  speed_tester: SpeedTester | None = None,
-                 host_interface_kind: Callable[[], InterfaceKind | None] = default_interface_kind) -> None:
-        """`client_factory(base_url, password)` creates router clients; it, `speed_tester` and
-        `host_interface_kind` are replaceable in tests."""
+                 host_interface_kind: Callable[[], InterfaceKind | None] = default_interface_kind,
+                 dns_tester: DnsTester | None = None) -> None:
+        """`client_factory(base_url, password)` creates router clients; it, `speed_tester`,
+        `host_interface_kind` and `dns_tester` are replaceable in tests."""
         self._make_client = client_factory
         self._host_interface_kind = host_interface_kind
         self._speed_tester = speed_tester or SpeedTester()
+        self._dns_tester = dns_tester or DnsTester()
         self._store = store
         # Logs of the identified router; nothing is logged before identification.
         self.data_log: DataLog | None = None
@@ -126,6 +134,9 @@ class Monitor:
         self.last_speedtest: SpeedTestSample | None = None
         # Rates over time during the last speed test: shows when 5G joined.
         self.last_speedtrace: list[SpeedTraceSample] = []
+        self.last_dns: list[DnsSample] = []
+        self._last_dns_attempt: datetime | None = None
+        self._dns_task: asyncio.Task[None] | None = None
         self.speedtest_error: str | None = None
         # Scheduled tests count from the last attempt, so failures are not retried every minute.
         self._last_speedtest_attempt: datetime | None = None
@@ -148,7 +159,7 @@ class Monitor:
         self._schedule_task = asyncio.get_running_loop().create_task(self._speedtest_schedule())
 
     async def stop(self) -> None:
-        for task in (self._poll_task, self._traffic_task, self._speedtest_task, self._schedule_task):
+        for task in (self._poll_task, self._traffic_task, self._speedtest_task, self._schedule_task, self._dns_task):
             if task:
                 task.cancel()
         await self._client.logout()
@@ -312,10 +323,71 @@ class Monitor:
         return True
 
     async def _speedtest_schedule(self) -> None:
+        """Automatic speed and DNS tests."""
         while True:
             await asyncio.sleep(_SPEEDTEST_CHECK_SECONDS)
-            if self._speedtest_due(datetime.now(UTC)):
+            now = datetime.now(UTC)
+            if self._speedtest_due(now):
                 self.start_speedtest()
+            if self._dns_due(now):
+                self.start_dns_test()
+
+    # DNS test
+
+    @property
+    def dns_running(self) -> bool:
+        return self._dns_task is not None
+
+    def start_dns_test(self) -> bool:
+        """False if a DNS test is running, monitoring is paused or no router is identified
+        (results are stored with the router)."""
+        if self.dns_running or self.paused or self.data_log is None:
+            return False
+        self._last_dns_attempt = datetime.now(UTC)
+        self._dns_task = asyncio.get_running_loop().create_task(self._run_dns_test())
+        return True
+
+    def _dns_due(self, now: datetime) -> bool:
+        interval = self.settings.dns_interval
+        last = self._last_dns_attempt
+        return bool(interval) and (last is None or now - last >= timedelta(minutes=interval))
+
+    async def _run_dns_test(self) -> None:
+        try:
+            settings = self.settings
+            addresses = {label: await self._dns_address(label) for label in settings.dns_servers}
+            reachable = [address for address in addresses.values() if address is not None]
+            results = await self._dns_tester.run(reachable, list(settings.dns_hostnames))
+            by_address = {(sample.server, sample.hostname): sample for sample in results}
+            now = results[0].time if results else datetime.now(UTC)
+            samples = []
+            for label, address in addresses.items():
+                for hostname in settings.dns_hostnames:
+                    measured = by_address.get((address, hostname)) if address else None
+                    samples.append(replace(measured, server=label) if measured
+                                   else DnsSample(now, label, hostname, None, DnsOutcome.ERROR))
+            self.last_dns = samples
+            if self.data_log is not None:
+                self.data_log.append_dns(samples)
+            log.info("DNS test: %d of %d queries answered", sum(s.outcome == DnsOutcome.OK for s in samples), len(samples))
+        finally:
+            self._dns_task = None
+
+    async def _dns_address(self, label: str) -> str | None:
+        """IP address to query: the router's for ROUTER_DNS (its URL may hold a name)."""
+        if label != ROUTER_DNS:
+            return label
+        host = urlsplit(self.settings.router_url).hostname or ""
+        try:
+            return str(ipaddress.ip_address(host))
+        except ValueError:
+            pass
+        try:
+            infos = await asyncio.get_running_loop().getaddrinfo(host, None, family=socket.AF_INET)
+        except OSError as error:
+            log.warning("DNS test: cannot resolve the router's address %s: %s", host, error)
+            return None
+        return str(infos[0][4][0])
 
     def _speedtest_due(self, now: datetime) -> bool:
         interval = self.settings.speedtest_interval
@@ -555,6 +627,9 @@ class Monitor:
         self.last_speedtrace = [] if self.last_speedtest is None else [
             point for point in self.data_log.speedtrace_samples(self.last_speedtest.time)
             if point.test_time == self.last_speedtest.time]
+        logged_dns = self.data_log.dns_samples(now - _SPEEDTEST_HISTORY)
+        self.last_dns = [sample for sample in logged_dns if sample.time == logged_dns[-1].time] if logged_dns else []
+        self._last_dns_attempt = logged_dns[-1].time if logged_dns else None
         self._last_speedtest_attempt = self.last_speedtest.time if self.last_speedtest else None
         self._event_values = {event.kind: event.value for event in self.data_log.event_samples(now - _EVENT_MEMORY)}
 
@@ -568,6 +643,7 @@ class Monitor:
         self._last_line = None
         self.last_speedtest = None
         self.last_speedtrace = []
+        self.last_dns = []
 
     async def _refresh_status(self) -> None:
         try:
