@@ -1,9 +1,10 @@
 from datetime import UTC, datetime, timedelta
 import os
 import stat
+import time
 from pathlib import Path
 
-from fakes import FakeRouter, FakeTester
+from fakes import TRACE_PHASE_SECONDS, FakeRouter, FakeTester
 from fastapi.testclient import TestClient
 
 from wanview.app.access import DashboardAccess
@@ -22,7 +23,9 @@ DEFAULTS = Settings(router_url="https://speedport.ip", status_interval=3600, det
 
 def client(tmp_path: Path, router: FakeRouter) -> TestClient:
     store = Store(tmp_path, DEFAULTS)
-    monitor = Monitor(store, None, client_factory=router.client, speed_tester=FakeTester())
+    tester = FakeTester()
+    tester.router = router
+    monitor = Monitor(store, None, client_factory=router.client, speed_tester=tester)
     return TestClient(create_app(monitor, DashboardAccess(store)))
 
 
@@ -129,6 +132,19 @@ def test_history_includes_all_logged_values(tmp_path: Path) -> None:
 
 def _iso(time: datetime) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_state_includes_last_speed_test_trace(tmp_path: Path) -> None:
+    with client(tmp_path, FakeRouter(receiver=True)) as api:
+        api.put("/api/password", json={"password": "secret"})
+        assert api.post("/api/speedtest").status_code == 202
+        for _ in range(50):
+            trace = api.get("/api/state").json()["speedtest"]["trace"]
+            if trace["down"] and trace["up"]:
+                break
+            time.sleep(TRACE_PHASE_SECONDS)
+    assert set(trace) == {"down", "downOnset", "up", "upOnset"}
+    assert all(len(point) == 3 for point in trace["down"])
 
 
 def test_dashboard_files_are_revalidated_on_every_load(tmp_path: Path) -> None:

@@ -7,13 +7,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from fakes import FakeRouter, FakeTester
+from fakes import TRACE_PHASE_SECONDS, FakeRouter, FakeTester
 import httpx
 
 from wanview.app.data_log import DataLog
 from wanview.app.monitor import Monitor
 from wanview.app.store import Choice, Settings, Store
 from wanview.domain.samples import EventKind, HostLink, StatusSample
+from wanview.domain.traffic import Direction
 from wanview.host_network import InterfaceKind
 from wanview.speedtest import RateLimited
 from wanview.domain.status import LineStatus
@@ -26,6 +27,15 @@ def router_log(tmp_path: Path, serial: str = "SN-A") -> DataLog:
     return DataLog(tmp_path / "routers" / serial / "logs")
 
 
+async def finish_speedtest(monitor: Monitor) -> None:
+    """Fake speed tests take TRACE_PHASE_SECONDS per phase of real time."""
+    for _ in range(50):
+        await asyncio.sleep(TRACE_PHASE_SECONDS)
+        if not monitor.speedtest_running:
+            return
+    raise AssertionError("speed test did not finish")
+
+
 async def settle() -> None:
     for _ in range(10):
         await asyncio.sleep(0)
@@ -35,8 +45,10 @@ async def started(tmp_path: Path, router: FakeRouter, initial_password: str | No
                   store: Store | None = None, tester: FakeTester | None = None,
                   host_kind: InterfaceKind | None = None) -> Monitor:
     store = store or Store(tmp_path, DEFAULTS)
+    tester = tester or FakeTester()
+    tester.router = router
     monitor = Monitor(store, initial_password, client_factory=router.client,
-                      speed_tester=tester or FakeTester(), host_interface_kind=lambda: host_kind)
+                      speed_tester=tester, host_interface_kind=lambda: host_kind)
     monitor.start()
     await settle()
     return monitor
@@ -243,7 +255,7 @@ async def test_speed_test_logs_result_with_5g_split(tmp_path: Path) -> None:
     monitor = await started(tmp_path, FakeRouter(receiver=True), initial_password="secret")
     assert monitor.start_speedtest()
     assert not monitor.start_speedtest()  # one at a time
-    await settle()
+    await finish_speedtest(monitor)
     sample = monitor.last_speedtest
     assert sample is not None and sample.down_bps == 100_000_000
     # 10 MB on the receiver port during the 1.6 s phase. The router's counters are read
@@ -257,11 +269,23 @@ async def test_speed_test_logs_result_with_5g_split(tmp_path: Path) -> None:
     await monitor.stop()
 
 
+async def test_speed_test_logs_rates_over_time(tmp_path: Path) -> None:
+    monitor = await started(tmp_path, FakeRouter(receiver=True), initial_password="secret")
+    monitor.start_speedtest()
+    await finish_speedtest(monitor)
+    await monitor.stop()
+    trace = monitor.last_speedtrace
+    assert {point.direction for point in trace} == {Direction.DOWN, Direction.UP}
+    assert all(point.point.mobile_bps is not None for point in trace)
+    logged = router_log(tmp_path).speedtrace_samples(monitor.last_speedtest.time - timedelta(seconds=1))
+    assert len(logged) == len(trace)
+
+
 async def test_speed_test_without_password_has_no_split(tmp_path: Path) -> None:
     router = FakeRouter(receiver=True)
     monitor = await started(tmp_path, router)
     monitor.start_speedtest()
-    await settle()
+    await finish_speedtest(monitor)
     assert monitor.last_speedtest is not None and monitor.last_speedtest.mobile_down_bps is None
     assert router.engineer_reads == []
     await monitor.stop()
@@ -270,7 +294,7 @@ async def test_speed_test_without_password_has_no_split(tmp_path: Path) -> None:
 async def test_speed_test_failure_is_reported(tmp_path: Path) -> None:
     monitor = await started(tmp_path, FakeRouter(), tester=FakeTester(fail=httpx.ConnectError("offline")))
     monitor.start_speedtest()
-    await settle()
+    await finish_speedtest(monitor)
     assert monitor.speedtest_error is not None and "offline" in monitor.speedtest_error
     assert not monitor.speedtest_running
     await monitor.stop()
@@ -294,7 +318,7 @@ async def test_speed_test_tells_wired_from_wifi(tmp_path: Path, receiver: bool, 
                                                 host_kind: InterfaceKind | None, expected: HostLink | None) -> None:
     monitor = await started(tmp_path, FakeRouter(receiver=receiver), initial_password=password, host_kind=host_kind)
     monitor.start_speedtest()
-    await settle()
+    await finish_speedtest(monitor)
     assert monitor.last_speedtest is not None and monitor.last_speedtest.host_link == expected
     await monitor.stop()
 
@@ -305,7 +329,7 @@ async def test_failed_scheduled_test_is_not_retried_every_minute(tmp_path: Path)
     now = datetime.now(UTC)
     assert monitor._speedtest_due(now)
     monitor.start_speedtest()
-    await settle()
+    await finish_speedtest(monitor)
     assert monitor.speedtest_error is not None
     assert not monitor._speedtest_due(now + timedelta(minutes=1))
     assert monitor._speedtest_due(now + timedelta(minutes=61))
@@ -317,7 +341,7 @@ async def test_rate_limit_postpones_scheduled_tests(tmp_path: Path) -> None:
     monitor.update_settings(Settings(DEFAULTS.router_url, 3600, 3600, speedtest_interval=30))
     now = datetime.now(UTC)
     monitor.start_speedtest()
-    await settle()
+    await finish_speedtest(monitor)
     assert monitor.speedtest_error is not None and "Cloudflare" in monitor.speedtest_error
     assert not monitor._speedtest_due(now + timedelta(minutes=61))
     assert monitor._speedtest_due(now + timedelta(minutes=121))

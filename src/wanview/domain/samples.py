@@ -8,7 +8,7 @@ from enum import StrEnum
 
 from wanview.domain.line import DSLDetails, ReceiverStatus
 from wanview.domain.status import LineStatus
-from wanview.domain.traffic import RECEIVER_PORT, BondingStatus, LANCounters, bits_per_second
+from wanview.domain.traffic import RECEIVER_PORT, BondingStatus, Direction, LANCounters, TracePoint, bits_per_second
 
 _SEPARATOR = ","
 _REPLACEMENT = " "
@@ -334,6 +334,38 @@ class SpeedTestSample:
         link = fields[6] if len(fields) == cls._FIELD_COUNT else ""
         return cls(time, latency, down, up, _int(fields[4]), _int(fields[5]),
                    HostLink(link) if link in HostLink._value2member_map_ else None)
+
+
+@dataclass(frozen=True)
+class SpeedTraceSample:
+    """One window of a speed test phase (see `traffic.phase_trace`); `test_time` is the
+    time of the speed test it belongs to."""
+
+    test_time: datetime
+    direction: Direction
+    point: TracePoint
+
+    CSV_HEADER = "test_time,direction,offset_s,total_bps,mobile_bps"
+    _FIELD_COUNT = 5
+
+    @property
+    def time(self) -> datetime:
+        return self.test_time
+
+    @property
+    def csv_row(self) -> str:
+        return _row([_time(self.test_time), self.direction.value, self.point.offset_seconds,
+                     self.point.total_bps, self.point.mobile_bps])
+
+    @classmethod
+    def from_csv(cls, row: str) -> "SpeedTraceSample | None":
+        fields = _fields(row, cls._FIELD_COUNT)
+        time = _parse_time(fields[0]) if fields else None
+        offset, total = (_float(fields[2]), _int(fields[3])) if fields else (None, None)
+        if (fields is None or time is None or fields[1] not in Direction._value2member_map_
+                or offset is None or total is None):
+            return None
+        return cls(time, Direction(fields[1]), TracePoint(offset, total, _int(fields[4])))
 
 
 class EventKind(StrEnum):

@@ -16,6 +16,7 @@ Thread-safety: use from one asyncio event loop only.
 """
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import Callable
@@ -35,6 +36,7 @@ from wanview.domain.samples import (
     NormalSync,
     OverflowSample,
     SpeedTestSample,
+    SpeedTraceSample,
     StatusSample,
     HostLink,
     details_events,
@@ -47,8 +49,10 @@ from wanview.domain.traffic import (
     LAN_PAGE,
     BondingStatus,
     HybridTrafficRate,
+    Direction,
     LANCounters,
     LANTrafficRate,
+    phase_trace,
 )
 from wanview.speedport.client import REBOOT_SECONDS, SpeedportClient
 from wanview.speedport.errors import SpeedportError, connection_problem
@@ -73,6 +77,7 @@ _SECONDS_PER_MINUTE = 60
 # The last result shown after a restart comes from the log of this window.
 _SPEEDTEST_HISTORY = timedelta(days=7)
 _BITS_PER_MEGABIT = 1_000_000
+_COUNTER_POLL_PAUSE_SECONDS = 0.2
 # Last logged value per event kind is looked up this far back after a restart.
 _EVENT_MEMORY = timedelta(days=30)
 _HOST_LINKS = {InterfaceKind.WIRED: HostLink.WIRED, InterfaceKind.WIFI: HostLink.WIFI}
@@ -119,6 +124,8 @@ class Monitor:
         self.normal_sync = NormalSync(None, None)
         self._normal_sync_due = 0.0
         self.last_speedtest: SpeedTestSample | None = None
+        # Rates over time during the last speed test: shows when 5G joined.
+        self.last_speedtrace: list[SpeedTraceSample] = []
         self.speedtest_error: str | None = None
         # Scheduled tests count from the last attempt, so failures are not retried every minute.
         self._last_speedtest_attempt: datetime | None = None
@@ -325,10 +332,42 @@ class Monitor:
         read_counters = self._may_use_login()
         has_receiver = self.readings.status is not None and self.readings.status.has_receiver
         readings: dict[tuple[str, str], LANCounters] = {}
+        # Every reading per phase, stamped with the middle of its request, for the rate over time.
+        series: dict[str, list[tuple[float, LANCounters]]] = {}
+        pollers: dict[str, asyncio.Task[None]] = {}
+
+        async def read(phase: str) -> LANCounters:
+            before = time.monotonic()
+            counters = LANCounters.from_page(await self._client.fetch_engineer_page(LAN_PAGE))
+            series[phase].append(((before + time.monotonic()) / 2, counters))
+            return counters
+
+        async def poll(phase: str) -> None:
+            # As often as the router answers (about once a second), with a pause so a fast
+            # answer does not turn into a busy loop.
+            while True:
+                await read(phase)
+                await asyncio.sleep(_COUNTER_POLL_PAUSE_SECONDS)
 
         async def around_phase(phase: str, edge: str) -> None:
-            if read_counters:
-                readings[(phase, edge)] = LANCounters.from_page(await self._client.fetch_engineer_page(LAN_PAGE))
+            if not read_counters:
+                return
+            if edge == "start":
+                series[phase] = []
+                readings[(phase, edge)] = await read(phase)
+                pollers[phase] = asyncio.get_running_loop().create_task(poll(phase))
+                return
+            pollers[phase].cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pollers[phase]
+            readings[(phase, edge)] = await read(phase)
+
+        def trace(test_time: datetime, phase: str, byte_trace: tuple[tuple[float, int], ...],
+                  direction: Direction) -> list[SpeedTraceSample]:
+            if not byte_trace:
+                return []
+            points = phase_trace(byte_trace, series.get(phase, []) if has_receiver else [], direction)
+            return [SpeedTraceSample(test_time, direction, point) for point in points]
 
         def phase_rate(phase: str, seconds: float) -> LANTrafficRate | None:
             """Port rates during a phase. The readings enclose the phase, so they hold all its
@@ -365,9 +404,12 @@ class Monitor:
                                      measurement.up_bps, mobile_bps(down_rate, "down", measurement.down_bps),
                                      mobile_bps(up_rate, "up", measurement.up_bps), link)
             self.last_speedtest = sample
+            self.last_speedtrace = (trace(sample.time, "download", measurement.down_trace, Direction.DOWN)
+                                    + trace(sample.time, "upload", measurement.up_trace, Direction.UP))
             self.speedtest_error = None
             if self.data_log is not None:
                 self.data_log.append_speedtest(sample)
+                self.data_log.append_speedtrace(self.last_speedtrace)
             log.info("Speed test: %.0f / %.0f Mbit/s, %.0f ms, host %s", sample.down_bps / _BITS_PER_MEGABIT,
                      sample.up_bps / _BITS_PER_MEGABIT, sample.latency_ms, link.value if link else "unknown")
         except RateLimited as error:
@@ -379,6 +421,8 @@ class Monitor:
             log.error("Speed test failed: %s", error)
             self.speedtest_error = f"Speed test failed: {error}"
         finally:
+            for poller in pollers.values():
+                poller.cancel()
             self._speedtest_task = None
             if read_counters and self._traffic_task is None:
                 await self._client.logout()
@@ -508,6 +552,9 @@ class Monitor:
         now = datetime.now(UTC)
         logged_tests = self.data_log.speedtest_samples(now - _SPEEDTEST_HISTORY)
         self.last_speedtest = logged_tests[-1] if logged_tests else None
+        self.last_speedtrace = [] if self.last_speedtest is None else [
+            point for point in self.data_log.speedtrace_samples(self.last_speedtest.time)
+            if point.test_time == self.last_speedtest.time]
         self._last_speedtest_attempt = self.last_speedtest.time if self.last_speedtest else None
         self._event_values = {event.kind: event.value for event in self.data_log.event_samples(now - _EVENT_MEMORY)}
 
@@ -520,6 +567,7 @@ class Monitor:
         self.readings = Readings()
         self._last_line = None
         self.last_speedtest = None
+        self.last_speedtrace = []
 
     async def _refresh_status(self) -> None:
         try:

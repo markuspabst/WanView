@@ -170,6 +170,34 @@ function renderSpeedtest(state) {
                  ["Measured", new Date(last.time).toLocaleString([], { dateStyle: "short", timeStyle: "short" })]);
   }
   rows("card-speedtest", entries, "No test yet.");
+  renderSpeedtrace(t);
+}
+
+// Rates over time during the last test: with hybrid bonding 5G joins once DSL is full,
+// which shows as a jump in the total and the 5G line.
+let renderedTraceTime = null;
+
+function renderSpeedtrace(t) {
+  const key = t.last ? t.last.time : null;
+  if (key === renderedTraceTime) return;
+  renderedTraceTime = key;
+  const container = document.getElementById("charts-speedtrace");
+  // Tests from before rates over time were recorded have no trace.
+  if (!t.last || (t.trace.down.length === 0 && t.trace.up.length === 0)) {
+    container.replaceChildren();
+    return;
+  }
+  const mbit = (v) => (v === null ? null : v / BITS_PER_MEGABIT);
+  const panel = (title, rows, onset) => {
+    const points = rows.map(([seconds, total, mobile]) => ({ time: seconds * 1000, values: [mbit(total), mbit(mobile)] }));
+    const end = rows.length ? Math.max(...rows.map((r) => r[0])) * 1000 + TRACE_AXIS_PAD_MS : TRACE_AXIS_PAD_MS;
+    const measured5G = rows.some((r) => r[2] !== null);
+    const note = !measured5G ? "5G part needs the device password and a receiver"
+      : onset === null ? "5G not used" : `5G joined after ${onset.toFixed(1)} s`;
+    return chart(title, "Mbit/s", ["total", "5G"], points, 0, end, Infinity, { dots: true, note, secondsAxis: true });
+  };
+  container.replaceChildren(panel("Last test: download over time", t.trace.down, t.trace.downOnset),
+                            panel("Last test: upload over time", t.trace.up, t.trace.upOnset));
 }
 
 function renderTraffic(state) {
@@ -444,6 +472,10 @@ const TICK_TARGET = 4;
 const GAP_FACTOR = 3;
 // With less data than the selected range the axis starts at the first value, but spans at least this.
 const MIN_AXIS_SPAN_MS = 10 * 60 * 1000;
+// The trace's last point is the middle of its window; the axis extends a little beyond it.
+const TRACE_AXIS_PAD_MS = 500;
+// Shorter seconds axes get one decimal, so their labels differ.
+const SECONDS_AXIS_DECIMAL_LIMIT_MS = 5000;
 // Titles of collapsed charts, kept across reloads and history refreshes.
 const COLLAPSED_KEY = "wanview.collapsedCharts";
 
@@ -486,7 +518,8 @@ const WIFI_COLORS = ["var(--wifi1)", "var(--wifi2)"];
 // Wi-Fi colour; `palette` replaces the series colours; `references` draws a dashed
 // line per series at that value (null: none).
 function chart(title, unit, names, points, start, end, maxGapMs,
-               { dots = false, bands = [], note = null, wifiNote = null, palette = SERIES_COLORS, references = [] } = {}) {
+               { dots = false, bands = [], note = null, wifiNote = null, palette = SERIES_COLORS, references = [],
+                 secondsAxis = false } = {}) {
   const box = element("details", { class: "chart" });
   box.open = !collapsedCharts().has(title);
   box.addEventListener("toggle", () => rememberCollapsed(title, !box.open));
@@ -504,7 +537,7 @@ function chart(title, unit, names, points, start, end, maxGapMs,
     const empty = element("div", { class: "plot" });
     empty.append(svgElement("svg", { viewBox: `0 0 ${CHART.width} ${CHART.height}`, preserveAspectRatio: "none" }),
                  element("span", { class: "no-data" }, "No data available"));
-    timeLabels(empty, start, end);
+    timeLabels(empty, start, end, secondsAxis);
     box.append(empty);
     return box;
   }
@@ -541,7 +574,7 @@ function chart(title, unit, names, points, start, end, maxGapMs,
     svg.append(svgElement("line", { x1: 0, x2: CHART.width, y1: y(value), y2: y(value), stroke: palette[series],
                                     "stroke-dasharray": "6 4", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }));
   });
-  timeLabels(plot, start, end);
+  timeLabels(plot, start, end, secondsAxis);
   names.forEach((_, series) => {
     let path = "", previous = null;
     for (const point of points) {
@@ -572,12 +605,13 @@ function chart(title, unit, names, points, start, end, maxGapMs,
   return box;
 }
 
-function timeLabels(plot, start, end) {
+// `secondsAxis`: times are milliseconds from 0 (a speed test phase), labelled "3 s".
+function timeLabels(plot, start, end, secondsAxis = false) {
   const shortRange = end - start <= TIME_LABEL_DAY_LIMIT_MS;
   const longRange = end - start > TIME_LABEL_WEEK_LIMIT_MS;
   for (const fraction of TIME_LABEL_FRACTIONS) {
     const t = start + (end - start) * fraction;
-    const text = new Date(t).toLocaleString([], shortRange ? { hour: "2-digit", minute: "2-digit" }
+    const text = secondsAxis ? `${(t / 1000).toFixed(end - start < SECONDS_AXIS_DECIMAL_LIMIT_MS ? 1 : 0)} s` : new Date(t).toLocaleString([], shortRange ? { hour: "2-digit", minute: "2-digit" }
       : longRange ? { day: "numeric", month: "short" } : { weekday: "short", hour: "2-digit", minute: "2-digit" });
     const align = fraction === 0 ? "start" : fraction === 1 ? "end" : "middle";
     plot.append(element("span", { class: `x-label ${align}`, style: `left: ${fraction * 100}%` }, text));

@@ -10,6 +10,7 @@ Wi-Fi clients transfer, too high during local transfers between wired devices.
 """
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 from wanview.speedport.engineer_page import EngineerPage, integer, number
 
@@ -24,6 +25,10 @@ _BYTES_COLUMN = 1
 _COUNTER_MODULUS = 1 << 32
 _BITS_PER_BYTE = 8
 _LEG_UP = "Up"
+# Without router readings a speed test trace has one point per this many seconds.
+_TRACE_WINDOW_SECONDS = 1.0
+# 5G counts as joined once it carries this share of a speed test's rate.
+_ONSET_SHARE = 0.1
 
 
 @dataclass(frozen=True)
@@ -161,3 +166,80 @@ class BondingStatus:
 def _kbps(raw: str | None) -> int | None:
     value = number(raw)
     return int(value) if value is not None else None
+
+
+class Direction(StrEnum):
+    DOWN = "down"
+    UP = "up"
+
+
+@dataclass(frozen=True)
+class TracePoint:
+    """Rates in one window of a speed test phase."""
+
+    offset_seconds: float
+    """Middle of the window, from the phase start."""
+    total_bps: int
+    mobile_bps: int | None
+    """5G part from the receiver port; None without router readings."""
+
+
+def _bytes_at(byte_trace: tuple[tuple[float, int], ...], moment: float) -> float:
+    """Bytes moved by `moment`, interpolated between the trace's samples."""
+    if moment <= byte_trace[0][0]:
+        return byte_trace[0][1]
+    for (t0, b0), (t1, b1) in zip(byte_trace, byte_trace[1:]):
+        if moment <= t1:
+            return b0 if t1 == t0 else b0 + (b1 - b0) * (moment - t0) / (t1 - t0)
+    return byte_trace[-1][1]
+
+
+def _mobile_bytes(before: LANCounters, after: LANCounters, direction: Direction,
+                  receiver_port: int) -> int | None:
+    old, new = before.port(receiver_port), after.port(receiver_port)
+    if old is None or new is None:
+        return None
+    # Seen from the router: 5G download arrives on the receiver port (RX).
+    first, last = (old.rx_bytes, new.rx_bytes) if direction == Direction.DOWN else (old.tx_bytes, new.tx_bytes)
+    if first is None or last is None or last < first:
+        return None
+    return last - first
+
+
+def phase_trace(byte_trace: tuple[tuple[float, int], ...], readings: list[tuple[float, LANCounters]],
+                direction: Direction, receiver_port: int = RECEIVER_PORT) -> tuple[TracePoint, ...]:
+    """Rates over one speed test phase, so the moment 5G joins shows as a jump.
+
+    `byte_trace`: (monotonic time, bytes moved so far) from the phase start to its end.
+    `readings`: router counters, each stamped with the middle of its request. The
+    windows run between consecutive readings, clipped to the phase; 5G bytes in a
+    window's part outside the phase are counted to the phase (the test's traffic
+    ends with it). Without readings the windows are _TRACE_WINDOW_SECONDS long.
+    """
+    start, end = byte_trace[0][0], byte_trace[-1][0]
+    if len(readings) >= 2:
+        windows = [(max(t0, start), min(t1, end), _mobile_bytes(c0, c1, direction, receiver_port))
+                   for (t0, c0), (t1, c1) in zip(readings, readings[1:])]
+    else:
+        edges = [start]
+        while edges[-1] + _TRACE_WINDOW_SECONDS < end:
+            edges.append(edges[-1] + _TRACE_WINDOW_SECONDS)
+        edges.append(end)
+        windows = [(w0, w1, None) for w0, w1 in zip(edges, edges[1:])]
+
+    points = []
+    for w0, w1, mobile_bytes in windows:
+        seconds = w1 - w0
+        if seconds <= 0:
+            continue
+        total = round((_bytes_at(byte_trace, w1) - _bytes_at(byte_trace, w0)) * _BITS_PER_BYTE / seconds)
+        mobile = None if mobile_bytes is None else min(round(mobile_bytes * _BITS_PER_BYTE / seconds), total)
+        points.append(TracePoint(round((w0 + w1) / 2 - start, 3), total, mobile))
+    return tuple(points)
+
+
+def mobile_onset(points: tuple[TracePoint, ...]) -> float | None:
+    """Offset of the first window in which 5G carries a noticeable share; None if never."""
+    return next((p.offset_seconds for p in points
+                 if p.mobile_bps is not None and p.total_bps > 0 and p.mobile_bps >= _ONSET_SHARE * p.total_bps),
+                None)

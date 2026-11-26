@@ -30,6 +30,8 @@ _TIMEOUT_SECONDS = 30.0
 _BITS_PER_BYTE = 8
 _MS_PER_SECOND = 1000
 _TOO_MANY_REQUESTS = 429
+# Bytes moved so far are recorded this often, so the rate over time (e.g. when 5G joins) can be shown.
+_TRACE_SECONDS = 0.25
 # Used when a 429 carries no usable Retry-After.
 _DEFAULT_RETRY_AFTER_SECONDS = 3600
 
@@ -57,6 +59,9 @@ class Measurement:
     down_seconds: float
     """Duration of the download phase; rates of router counters read around it use this."""
     up_seconds: float
+    down_trace: tuple[tuple[float, int], ...] = ()
+    """(time.monotonic(), bytes moved so far) during the download phase, from its start."""
+    up_trace: tuple[tuple[float, int], ...] = ()
 
 
 class SpeedTester:
@@ -69,10 +74,12 @@ class SpeedTester:
     async def run(self, around_phase: Callable[[str, str], Awaitable[None]] | None = None) -> Measurement:
         async with httpx.AsyncClient(base_url=self._base_url, timeout=_TIMEOUT_SECONDS) as http:
             latency = await self._latency(http)
-            down, down_seconds = await self._timed("download", around_phase,
-                                                   lambda deadline: self._download(http, deadline))
-            up, up_seconds = await self._timed("upload", around_phase, lambda deadline: self._upload(http, deadline))
-        return Measurement(latency_ms=latency, down_bps=down, up_bps=up, down_seconds=down_seconds, up_seconds=up_seconds)
+            down, down_seconds, down_trace = await self._timed(
+                "download", around_phase, lambda deadline, moved: self._download(http, deadline, moved))
+            up, up_seconds, up_trace = await self._timed(
+                "upload", around_phase, lambda deadline, moved: self._upload(http, deadline, moved))
+        return Measurement(latency_ms=latency, down_bps=down, up_bps=up, down_seconds=down_seconds,
+                           up_seconds=up_seconds, down_trace=down_trace, up_trace=up_trace)
 
     async def _latency(self, http: httpx.AsyncClient) -> float:
         rounds = []
@@ -84,34 +91,46 @@ class SpeedTester:
         return statistics.median(rounds)
 
     async def _timed(self, name: str, around_phase: Callable[[str, str], Awaitable[None]] | None,
-                     stream: Callable[[float], Awaitable[int]]) -> tuple[int, float]:
-        """Rate in bit/s and duration in seconds of one phase."""
+                     stream: Callable[[float, list[int]], Awaitable[None]]
+                     ) -> tuple[int, float, tuple[tuple[float, int], ...]]:
+        """Rate in bit/s, duration in seconds and byte trace of one phase. The streams add
+        to one shared byte count, which a sampler records every _TRACE_SECONDS."""
         if around_phase:
             await around_phase(name, "start")
+        moved = [0]
+        trace = [(time.monotonic(), 0)]
+
+        async def sample() -> None:
+            while True:
+                await asyncio.sleep(_TRACE_SECONDS)
+                trace.append((time.monotonic(), moved[0]))
+
         start = time.perf_counter()
         deadline = start + _PHASE_SECONDS
-        moved = sum(await asyncio.gather(*(stream(deadline) for _ in range(_STREAMS))))
+        sampler = asyncio.create_task(sample())
+        try:
+            await asyncio.gather(*(stream(deadline, moved) for _ in range(_STREAMS)))
+        finally:
+            sampler.cancel()
         elapsed = time.perf_counter() - start
+        trace.append((time.monotonic(), moved[0]))
         if around_phase:
             await around_phase(name, "end")
-        return int(moved * _BITS_PER_BYTE / elapsed), elapsed
+        return int(moved[0] * _BITS_PER_BYTE / elapsed), elapsed, tuple(trace)
 
-    async def _download(self, http: httpx.AsyncClient, deadline: float) -> int:
-        moved = 0
+    async def _download(self, http: httpx.AsyncClient, deadline: float, moved: list[int]) -> None:
+        """Adds the bytes received to `moved[0]`, shared by all streams."""
         while time.perf_counter() < deadline:
             async with http.stream("GET", "/__down", params={"bytes": _DOWNLOAD_CHUNK_BYTES}) as response:
                 _check(response)
                 async for chunk in response.aiter_bytes(_READ_SIZE):
-                    moved += len(chunk)
+                    moved[0] += len(chunk)
                     if time.perf_counter() >= deadline:
-                        return moved
-        return moved
+                        return
 
-    async def _upload(self, http: httpx.AsyncClient, deadline: float) -> int:
-        moved = 0
+    async def _upload(self, http: httpx.AsyncClient, deadline: float, moved: list[int]) -> None:
         payload = bytes(_UPLOAD_CHUNK_BYTES)
         while time.perf_counter() < deadline:
             response = await http.post("/__up", content=payload)
             _check(response)
-            moved += len(payload)
-        return moved
+            moved[0] += len(payload)

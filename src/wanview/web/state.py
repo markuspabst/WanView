@@ -8,7 +8,7 @@ from wanview.app.monitor import Monitor
 from wanview.domain.line import Cell
 from wanview.domain.samples import ErrorRate, NormalSync, StatusSample
 from wanview.domain.quality import Quality, crc_quality, rsrp_quality, rsrq_quality, snr_quality, sync_quality, worst
-from wanview.domain.traffic import HybridTrafficRate
+from wanview.domain.traffic import Direction, HybridTrafficRate, mobile_onset
 
 _KBIT = 1000
 _ONLINE = "online"
@@ -157,7 +157,18 @@ def _speedtest(monitor: Monitor) -> dict:
             "dslDown": last.dsl_down_bps, "dslUp": last.dsl_up_bps,
             "hostLink": last.host_link.value if last.host_link else None,
         },
+        "trace": _speedtrace(monitor),
     }
+
+
+def _speedtrace(monitor: Monitor) -> dict:
+    """Rates over time of the last test per direction: [seconds from phase start, total, 5G]."""
+    result: dict = {}
+    for direction in Direction:
+        points = tuple(sample.point for sample in monitor.last_speedtrace if sample.direction == direction)
+        result[direction.value] = [[p.offset_seconds, p.total_bps, p.mobile_bps] for p in points]
+        result[f"{direction.value}Onset"] = mobile_onset(points)
+    return result
 
 
 def _measured(value: float | None) -> float | None:

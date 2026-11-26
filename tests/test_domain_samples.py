@@ -11,11 +11,12 @@ from wanview.domain.samples import (
     NormalSync,
     OverflowSample,
     SpeedTestSample,
+    SpeedTraceSample,
     StatusSample,
     link_from_router_ports,
 )
 from wanview.domain.status import LineStatus
-from wanview.domain.traffic import BondingStatus, LANCounters
+from wanview.domain.traffic import BondingStatus, Direction, LANCounters, TracePoint
 from wanview.speedport.engineer_page import EngineerPage
 from wanview.speedport.varlist import VarList
 
@@ -177,3 +178,10 @@ def test_link_from_router_ports(lan_down: int | None, lan_up: int | None, expect
 
 def test_only_wifi_links_limit_the_result() -> None:
     assert [link for link in HostLink if link.limits_result] == [HostLink.WIFI, HostLink.ROUTER_WIFI]
+
+
+def test_speed_trace_round_trip() -> None:
+    sample = SpeedTraceSample(TIME, Direction.DOWN, TracePoint(3.0, 100_000_000, 40_000_000))
+    assert sample.csv_row == "2026-11-23T18:53:20Z,down,3.0,100000000,40000000"
+    assert SpeedTraceSample.from_csv(sample.csv_row) == sample
+    assert SpeedTraceSample.from_csv(SpeedTraceSample.CSV_HEADER) is None

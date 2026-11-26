@@ -4,6 +4,7 @@
     2026-11-23-line.csv     every line-details poll
     2026-11-23-overflow.csv every line-details poll with a 5G receiver
     2026-11-23-speedtest.csv every speed test
+    2026-11-23-speedtrace.csv rates over time during each speed test (5G joining)
     2026-11-23-events.csv   changed values: reconnects, firmware, DSL mode/state, receiver state, cells
 
 Files are not pruned (about 300 KB per day). Not thread-safe: use from the event loop.
@@ -14,13 +15,21 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, TypeVar
 
-from wanview.domain.samples import EventSample, LineSample, OverflowSample, SpeedTestSample, StatusSample
+from wanview.domain.samples import (
+    EventSample,
+    LineSample,
+    OverflowSample,
+    SpeedTestSample,
+    SpeedTraceSample,
+    StatusSample,
+)
 
 _STATUS = "status"
 _LINE = "line"
 _OVERFLOW = "overflow"
 _SPEEDTEST = "speedtest"
 _EVENTS = "events"
+_SPEEDTRACE = "speedtrace"
 
 
 class _Sample(Protocol):
@@ -30,7 +39,7 @@ class _Sample(Protocol):
     def csv_row(self) -> str: ...
 
 
-SampleT = TypeVar("SampleT", StatusSample, LineSample, OverflowSample, SpeedTestSample, EventSample)
+SampleT = TypeVar("SampleT", StatusSample, LineSample, OverflowSample, SpeedTestSample, EventSample, SpeedTraceSample)
 
 
 class DataLog:
@@ -49,6 +58,13 @@ class DataLog:
 
     def append_speedtest(self, sample: SpeedTestSample) -> None:
         self._append(sample, SpeedTestSample.CSV_HEADER, _SPEEDTEST)
+
+    def append_speedtrace(self, samples: list[SpeedTraceSample]) -> None:
+        for sample in samples:
+            self._append(sample, SpeedTraceSample.CSV_HEADER, _SPEEDTRACE)
+
+    def speedtrace_samples(self, since: datetime) -> list[SpeedTraceSample]:
+        return self._read(_SPEEDTRACE, since, SpeedTraceSample.from_csv)
 
     def append_event(self, sample: EventSample) -> None:
         self._append(sample, EventSample.CSV_HEADER, _EVENTS)

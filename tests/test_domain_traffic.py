@@ -1,5 +1,16 @@
 from wanview.domain.line import DSLDetails, DSLDirection, ReceiverStatus, Cell
-from wanview.domain.traffic import BondingStatus, HybridTrafficRate, LANCounters, LANTrafficRate, PortCounters, PortRate
+from wanview.domain.traffic import (
+    RECEIVER_PORT,
+    BondingStatus,
+    Direction,
+    HybridTrafficRate,
+    LANCounters,
+    LANTrafficRate,
+    PortCounters,
+    PortRate,
+    mobile_onset,
+    phase_trace,
+)
 from wanview.speedport.engineer_page import EngineerPage
 
 
@@ -138,3 +149,32 @@ def test_bonding_parses_legs_and_limits() -> None:
     DSL_DBW = "84716";
     """))
     assert bonding == BondingStatus(True, False, 84716, 30121)
+
+
+MB = 1_000_000
+
+
+def receiver_counters(rx: int, tx: int = 0) -> LANCounters:
+    return LANCounters((PortCounters(RECEIVER_PORT, None, tx, rx),))
+
+
+def test_phase_trace_shows_when_5g_joins() -> None:
+    # 100 Mbit/s for 8 s; 5G carries nothing for 2 s, then 40 Mbit/s.
+    start = 1000.0
+    byte_trace = tuple((start + s, int(s * 12.5 * MB)) for s in (0.0, 2.0, 4.0, 6.0, 8.0))
+    readings = [(start - 0.5, receiver_counters(0)), (start + 2.0, receiver_counters(0)),
+                (start + 4.0, receiver_counters(10 * MB)), (start + 6.0, receiver_counters(20 * MB)),
+                (start + 8.5, receiver_counters(30 * MB))]
+    points = phase_trace(byte_trace, readings, Direction.DOWN)
+    assert [(p.offset_seconds, p.total_bps, p.mobile_bps) for p in points] == [
+        (1.0, 100_000_000, 0), (3.0, 100_000_000, 40_000_000), (5.0, 100_000_000, 40_000_000),
+        (7.0, 100_000_000, 40_000_000)]
+    assert mobile_onset(points) == 3.0
+
+
+def test_phase_trace_without_router_readings_has_total_only() -> None:
+    byte_trace = tuple((s, int(s * 12.5 * MB)) for s in (0.0, 0.5, 1.0, 1.5, 2.0))
+    points = phase_trace(byte_trace, [], Direction.DOWN)
+    assert [(p.offset_seconds, p.total_bps, p.mobile_bps) for p in points] == [
+        (0.5, 100_000_000, None), (1.5, 100_000_000, None)]
+    assert mobile_onset(points) is None
